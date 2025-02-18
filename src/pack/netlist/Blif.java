@@ -78,7 +78,6 @@ public class Blif {
 	}
 	public void write(boolean dielevel){
 		try {
-			//Output.println("The value of die part is " + Partition.diePart);
 			FileWriter writer = null;
 			if(num < 0){
 				writer = new FileWriter(this.folder + blif + ".blif");

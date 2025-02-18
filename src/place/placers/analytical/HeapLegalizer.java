@@ -27,7 +27,7 @@ class HeapLegalizer extends Legalizer {
     // These are temporary data structures
     protected GrowingArea[][] areaPointers;
     protected List<List<List<LegalizerBlock>>> blockMatrix;
-
+    protected int currentDie;
     HeapLegalizer(
             Circuit circuit,
             List<BlockType> blockTypes,
@@ -44,29 +44,29 @@ class HeapLegalizer extends Legalizer {
             Map<GlobalBlock, NetBlock> netBlocks,
             Logger logger) throws IllegalArgumentException {
 
-        super(circuit, blockTypes, blockTypeIndexStarts, numIterations,linearX, linearY, legalX, legalY, heights, leafNode, nets, visualizer, netBlocks, logger);
+        super(circuit, blockTypes, blockTypeIndexStarts, numIterations, linearX, linearY, legalX, legalY, heights, leafNode, nets, visualizer, netBlocks, logger);
 
 
         // Initialize the matrix to contain a linked list at each coordinate
-        this.blockMatrix = new ArrayList<List<List<LegalizerBlock>>>(this.width+2);
-        for(int column = 0; column < this.width + 2; column++) {
-            List<List<LegalizerBlock>> blockColumn = new ArrayList<>(this.height+2);
-            for(int row = 0; row < this.height + 2; row++) {
+        this.blockMatrix = new ArrayList<List<List<LegalizerBlock>>>(this.width);
+        for(int column = 0; column < this.width; column++) {
+            List<List<LegalizerBlock>> blockColumn = new ArrayList<>(this.height);
+            for(int row = 0; row < this.height ; row++) {
                 blockColumn.add(new ArrayList<LegalizerBlock>());
             }
             this.blockMatrix.add(blockColumn);
         }
+        this.currentDie = this.circuit.getCurrentDie();
     }
 
 
     @Override
     protected void legalizeBlockType(int blocksStart, int blocksEnd) {
-
-        // Make a matrix that contains the blocks that are closest to each position
         initializeBlockMatrix(blocksStart, blocksEnd);
 
         // Build a set of disjunct areas that are not over-utilized
-        this.areaPointers = new GrowingArea[this.width+2][this.height+2];
+        this.areaPointers = new GrowingArea[this.width][this.height];
+
         List<GrowingArea> areas = this.growAreas();
 
         // Legalize all unabsorbed areas
@@ -79,8 +79,8 @@ class HeapLegalizer extends Legalizer {
 
     private void initializeBlockMatrix(int blocksStart, int blocksEnd) {
         // Clear the block matrix
-        for(int column = 0; column < this.width + 2; column++) {
-            for(int row = 0; row < this.height + 2; row++) {
+        for(int column = 0; column < this.width ; column++) {
+            for(int row = 0; row < this.height; row++) {
                 this.blockMatrix.get(column).get(row).clear();
             }
         }
@@ -98,6 +98,7 @@ class HeapLegalizer extends Legalizer {
 
                 LegalizerBlock newBlock = new LegalizerBlock(index, offset, height);
                 this.blockMatrix.get(column).get(row).add(newBlock);
+
             }
         }
     }
@@ -106,26 +107,27 @@ class HeapLegalizer extends Legalizer {
     private AbstractSite getClosestSite(double x, double y) {
 
         int column, row;
+        
 
         if(this.blockCategory == BlockCategory.CLB) {
             column = (int) Math.round(x);
-            row = (int) Math.round(Math.max(Math.min(y, this.height), 1));
+            row = (int) Math.round(Math.max(Math.min(y, this.height - 3), 2));
 
         } else {
-            int numColumns = (int) Math.floor((this.width - this.blockStart) / this.blockRepeat + 1);
-            int columnIndex = (int) Math.round(Math.max(Math.min((x - this.blockStart) / this.blockRepeat, numColumns - 1), 0));
+            int numColumns = (int) Math.floor((this.width - 2 - this.blockStart) / this.blockRepeat + 1);
+            int columnIndex = (int) Math.round(Math.max(Math.min((x - this.blockStart) / this.blockRepeat, numColumns - 1), 2));
             column = columnIndex * this.blockRepeat + this.blockStart;
 
-            int numRows = (int) Math.floor((this.height) / this.blockHeight);
-            int rowIndex = (int) Math.round(Math.max(Math.min((y - 1) / this.blockHeight, numRows - 1), 0));
+            int numRows = (int) Math.floor((this.height - 4) / this.blockHeight);
+            int rowIndex = (int) Math.round(Math.max(Math.min((y - 1) / this.blockHeight, numRows - 1), 2));
             row = rowIndex * this.blockHeight + 1;
         }
 
         // Get closest legal column
         int direction = (x > column) ? 1 : -1;
         while(true) {
-            if(column > 0 && column < this.width+1 && this.circuit.getColumnType(column).equals(this.blockType)) {
-                return this.circuit.getSite(column, row);
+            if(column > 0 && column < this.width && this.circuit.getColumnType(column).equals(this.blockType)) {
+                return this.circuit.getSite(this.currentDie, column, row);
             }
 
             column += direction * this.blockRepeat;
@@ -139,19 +141,24 @@ class HeapLegalizer extends Legalizer {
 
         // This dummy element is added to simplify the test inside the while loop
         columns.add(Integer.MIN_VALUE);
-        for(int column = this.blockStart; column < this.width + 1; column += this.blockRepeat) {
-            if(this.circuit.getColumnType(column).equals(this.blockType)) {
-                columns.add(column);
-            }
+  
+        for(int column = this.blockStart; column < this.width; column += this.blockRepeat) {
+        	if(this.circuit.getColumnType(column)!= null) {
+                if(this.circuit.getColumnType(column).equals(this.blockType)) {
+                    columns.add(column);
+                }
+        	}
+
         }
         int columnStartIndex = columns.size() / 2;
         int columnEndIndex = (columns.size() + 1) / 2;
         double centerX = (columns.get(columnStartIndex) + columns.get(columnEndIndex)) / 2.0;
-
-
+       
+ 
+        
         List<Integer> rows = new ArrayList<Integer>();
         rows.add(Integer.MIN_VALUE);
-        for(int row = 1; row < this.height + 2 - this.blockHeight; row += this.blockHeight) {
+        for(int row = 2; row < this.height - 1 - this.blockHeight; row += this.blockHeight) {
             rows.add(row);
         }
         int rowStartIndex = rows.size() / 2;
@@ -170,7 +177,7 @@ class HeapLegalizer extends Legalizer {
                 this.tryNewArea(areas, column, row);
             }
         }
-
+  
         while(columnStartIndex > 1 || rowStartIndex > 1) {
             // Run over the two closest columns
             if(centerX - columns.get(columnStartIndex - 1) <= centerY - rows.get(rowStartIndex - 1)) {
@@ -215,6 +222,7 @@ class HeapLegalizer extends Legalizer {
     private void tryNewArea(List<GrowingArea> areas, int column, int row) {
         if(this.blockMatrix.get(column).get(row).size() >= 1
                 && this.areaPointers[column][row] == null) {
+
             GrowingArea newArea = this.newArea(column, row);
             areas.add(newArea);
         }
@@ -233,22 +241,27 @@ class HeapLegalizer extends Legalizer {
 
         do {
             this.growAreaOneStep(area);
+    
         } while(area.getOccupation() > area.getCapacity());
 
         return area;
     }
 
     private void growAreaOneStep(GrowingArea area) {
+ 
         while(true) {
             int[] direction = area.nextGrowDirection();
             GrowingArea goalArea = new GrowingArea(area, direction);
 
-            boolean growthPossible = goalArea.isLegal(this.width+2, this.height+2);
+            boolean growthPossible = goalArea.isLegal(this.width, this.height );
             if(growthPossible) {
+            	
                 this.growArea(area, goalArea);
+                
                 return;
 
             } else {
+            	
                 area.disableDirection();
             }
         }
@@ -260,7 +273,6 @@ class HeapLegalizer extends Legalizer {
         // While goalArea is not completely covered by area
         while(true) {
             int rowStart, rowEnd, columnStart, columnEnd;
-
             // Check if growing the area would go out of the bounds of the FPGA
             if(goalArea.right > area.right || goalArea.left < area.left) {
                 rowStart = area.bottom;
@@ -297,12 +309,14 @@ class HeapLegalizer extends Legalizer {
             }
 
 
-
             for(int row = rowStart; row <= rowEnd; row += this.blockHeight) {
                 for(int column = columnStart; column <= columnEnd; column += this.blockRepeat) {
+
                     this.addTileToArea(area, goalArea, column, row);
+
                 }
             }
+
         }
     }
 
@@ -324,21 +338,25 @@ class HeapLegalizer extends Legalizer {
         this.areaPointers[column][row] = area;
 
         // Update the capacity and occupancy
-        AbstractSite site = this.circuit.getSite(column, row, true);
-        if(site != null && site.getType().equals(this.blockType)) {
+        AbstractSite site = this.circuit.getSite(this.currentDie, column, row, true);
+
+        if(site != null && (site.getType().equals(this.blockType))) {
+
             area.incrementTiles();
 
             for(LegalizerBlock block : this.blockMatrix.get(column).get(row)) {
+
                 // Add this block to the area if it is the root of a macro
                 if(block.offset == 0) {
+
                     area.addBlock(block);
                 }
 
                 // If this is a macro:
                 // Update the goal area to contain the entire macro
                 if(block.macroHeight > 1) {
-                    goalArea.top = Math.min(this.height, Math.max(goalArea.top, row + block.macroHeight - 1 - block.offset));
-                    goalArea.bottom = Math.max(1, Math.min(goalArea.bottom, row - block.offset));
+                    goalArea.top = Math.min(this.height - 3, Math.max(goalArea.top, row + block.macroHeight - 1 - block.offset));
+                    goalArea.bottom = Math.max(2, Math.min(goalArea.bottom, row - block.offset));
                 }
             }
         }
@@ -547,6 +565,7 @@ class HeapLegalizer extends Legalizer {
         }
 
         this.legalX[blockIndex] = column;
+
     }
 
     private boolean badColumn(int column, SplittingArea area) {
@@ -812,10 +831,10 @@ class HeapLegalizer extends Legalizer {
 
         boolean isLegal(int width, int height) {
             return
-                    this.left >=1
-                    && this.right <= width - 2
-                    && this.bottom >= 1
-                    && this.top + this.areaBlockHeight <= height - 1;
+                    this.left >= 2
+                    && this.right < width - 2
+                    && this.bottom >= 2
+                    && this.top + this.areaBlockHeight < height - 1;
         }
 
 

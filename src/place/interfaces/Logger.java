@@ -15,8 +15,6 @@ public class Logger {
 
 
     Logger() {
-
-        // I only want dots as decimal separators
         Locale.setDefault(new Locale("en", "US"));
 
         this.filenames[Stream.OUT.ordinal()] = "out.log";

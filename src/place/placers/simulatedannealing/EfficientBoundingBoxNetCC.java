@@ -17,7 +17,11 @@ public class EfficientBoundingBoxNetCC {
 
     private Map<GlobalBlock, List<EfficientBoundingBoxData>> bbDataMap;
     private ArrayList<EfficientBoundingBoxData> bbDataArray;
+    private Map<GlobalBlock, List<EfficientBoundingBoxData>> bbDataMapSLL;
+    private ArrayList<EfficientBoundingBoxData> bbDataArraySLL;
     private int numPins;
+    private int numBlockspair;
+
 
     // Contains the blocks for which the associated boundingBox's might need to be reverted
     private List<GlobalBlock> toRevert = new ArrayList<>();
@@ -30,45 +34,77 @@ public class EfficientBoundingBoxNetCC {
         // Process all nets by iterating over all net source pins
         this.numPins = 0;
         for(GlobalBlock block : circuit.getGlobalBlocks()) {
+
             for(AbstractPin pin : block.getOutputPins()) {
+            	
                 this.processPin((GlobalPin) pin);
             }
         }
 
         this.bbDataArray.trimToSize();
-    }
+    }   
+    
 
+    public EfficientBoundingBoxNetCC(Circuit[] circuit, int dieCount, int SLLrows ) {
+
+        this.bbDataArraySLL = new ArrayList<EfficientBoundingBoxData>();
+
+        Map<String,ArrayList<GlobalBlock>> dummyBlocks = new HashMap<String, ArrayList<GlobalBlock>>();
+        String blockname;
+        for(int dieCounter = 0; dieCounter < dieCount ;dieCounter++) {
+        	for(GlobalBlock block : circuit[dieCounter].getGlobalBlocks()) {
+        		if(block.isSLLDummy()) {
+        			blockname = block.getName();
+        			if(!dummyBlocks.containsKey(blockname)) {
+        				dummyBlocks.put(blockname, new ArrayList<GlobalBlock>());
+        				dummyBlocks.get(blockname).add(block);
+        			}else {
+        				dummyBlocks.get(blockname).add(block);
+        			}
+
+        		}
+        	}
+        }
+        
+        for(String sllname : dummyBlocks.keySet()) {
+        	this.processBlocks(dummyBlocks.get(sllname), dieCount, SLLrows);
+        }
+        
+
+        this.bbDataArraySLL.trimToSize();
+    } 
+
+    private void processBlocks(ArrayList<GlobalBlock> SLLblocks, int dieCount ,int SLLrows) {
+    	this.numBlockspair++;
+    	GlobalBlock[] blockArray = new GlobalBlock[dieCount];
+    	blockArray = SLLblocks.toArray(blockArray);
+    	
+    	EfficientBoundingBoxData SLLBBData = new EfficientBoundingBoxData(blockArray, SLLrows); 
+    	this.bbDataArraySLL.add(SLLBBData);
+    }
     private void processPin(GlobalPin pin) {
 
-        // Dont't count pins without sinks, or pins that feed clocks
         int numSinks = pin.getNumSinks();
         if(numSinks == 0 || pin.getSink(0).getPortType().isClock()) {
             return;
         }
-
         this.numPins++;
 
         EfficientBoundingBoxData bbData = new EfficientBoundingBoxData(pin);
         this.bbDataArray.add(bbData);
 
-        // Process source block
+
         if(this.bbDataMap.get(pin.getOwner()) == null) {
             this.bbDataMap.put(pin.getOwner(), new ArrayList<EfficientBoundingBoxData>());
         }
-        // Add the current BoundingBoxData object to the arraylist
-        // We don't need to check if it is already in because this is the first time we add the current BoundingBoxData object
         this.bbDataMap.get(pin.getOwner()).add(bbData);
 
-        // Process sink blocks
         for(int i = 0; i < numSinks; i++) {
             GlobalPin sink = pin.getSink(i);
-
             if(this.bbDataMap.get(sink.getOwner()) == null) {
                 this.bbDataMap.put(sink.getOwner(), new ArrayList<EfficientBoundingBoxData>());
             }
             List<EfficientBoundingBoxData> sinkBlockList = this.bbDataMap.get(sink.getOwner());
-            // Check if the current BoundingBoxData object is already in the arraylist
-            // This can happen when a single net has two connections to the same block
             boolean isAlreadyIn = false;
             for(EfficientBoundingBoxData data: sinkBlockList) {
                 if(data == bbData) {
@@ -91,12 +127,19 @@ public class EfficientBoundingBoxNetCC {
 
     public double calculateTotalCost() {
         double totalCost = 0.0;
+        System.out.print("\nThe size of bbData array is " + this.bbDataArray.size()+"\n");
         for(int i = 0; i < this.numPins; i++) {
             totalCost += this.bbDataArray.get(i).getNetCost();
         }
         return totalCost;
     }
-
+    public double calculateTotalSLLCost() {
+        double totalCost = 0.0;
+        for(int i = 0; i < this.numBlockspair; i++) {
+            totalCost += this.bbDataArraySLL.get(i).getNetCost();
+        }
+        return totalCost;
+    }
     public double calculateBlockCost(GlobalBlock block){
     	double cost = 0.0;
     	if(this.bbDataMap.containsKey(block)){
@@ -148,7 +191,7 @@ public class EfficientBoundingBoxNetCC {
 
     public void recalculateFromScratch() {
         for(int i = 0; i < this.numPins; i++) {
-            this.bbDataArray.get(i).calculateBoundingBoxFromScratch();
+            this.bbDataArray.get(i).calculateBoundingBoxFromScratch(false);
         }
     }
 

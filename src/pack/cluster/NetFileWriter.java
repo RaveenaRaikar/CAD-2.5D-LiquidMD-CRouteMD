@@ -5,7 +5,11 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+
+import javax.swing.text.html.HTMLDocument.Iterator;
 
 import pack.netlist.B;
 import pack.netlist.N;
@@ -17,11 +21,12 @@ import pack.util.Util;
 
 public class NetFileWriter {
 	private Netlist root;
-	
+	private Netlist Orig;
 	private List<LogicBlock> logicBlocks;
 	
 	private List<N> netlistInputs;
 	private List<N> netlistOutputs;
+	private List<String> netlistSLLs;
 
 	private BufferedWriter writer;
 	
@@ -32,9 +37,9 @@ public class NetFileWriter {
 
 	private int blockC;
 	
-	public NetFileWriter(List<LogicBlock> logicBlocks, Netlist root){
+	public NetFileWriter(List<LogicBlock> logicBlocks, Netlist root, Netlist Orig){
 		this.root = root;
-		
+		this.Orig = Orig;
 		this.logicBlocks = logicBlocks;
 		
 		this.t = new Timing();
@@ -48,24 +53,58 @@ public class NetFileWriter {
 	
 	public void netlistInputs(){
 		this.netlistInputs = new ArrayList<>();
+		this.netlistSLLs  = new ArrayList<>();
+		
+		for(String netname: this.root.partInputs) {
+			if(!this.Orig.get_Orig_input_nets().contains(netname)) {
+				this.netlistSLLs.add(netname);
+			}
+		}
 		for(B b:this.root.get_blocks()){
 			for(N n:b.get_input_nets()){
 				if(!n.has_source() && n.has_terminals()){
-					if(!this.netlistInputs.contains(n)){
-						this.netlistInputs.add(n);
+					if(!this.netlistInputs.contains(n) ){
+						if(this.Orig.get_Orig_input_nets().contains(n.get_name()))
+						{
+							this.netlistInputs.add(n);
+						}
 					}
 				}
 			}
 		}
 		Collections.sort(this.netlistInputs, N.NetFanoutComparator);
 	}
+	
+	public void netlistSLLs(List<String> SLLConns){
+		this.netlistSLLs = new ArrayList<String>();
+		
+		for(String element:SLLConns){
+			this.netlistSLLs.add(element);
+		}
+	}
+	
 	public void netlistOutputs(){
 		this.netlistOutputs = new ArrayList<>();
+		ArrayList<String> tempList = new ArrayList<String>();
+		tempList = this.Orig.get_Orig_output_nets();
+		
+		for(String netname: this.root.partOutputs) {
+			if(!this.Orig.get_Orig_input_nets().contains(netname)) {
+				if(!this.netlistSLLs.contains(netname)) {
+					this.netlistSLLs.add(netname);
+				}
+				
+			}
+		}
 		for(B b:this.root.get_blocks()){
 			for(N n:b.get_output_nets()){
-				if(n.has_terminals()){
+				if(n.has_terminals()){				
 					if(!this.netlistOutputs.contains(n)){
-						this.netlistOutputs.add(n);
+						if(tempList.contains(n.get_name()))
+						{
+							this.netlistOutputs.add(n);
+						}
+						
 					}
 				}
 			}
@@ -82,6 +121,9 @@ public class NetFileWriter {
 			}
 		}
 	}
+	public List<N> getNetlistOutput() {
+		return this.netlistOutputs;
+	}
 	public void makeNetFile(String resultFolder, int partnum){
 		makeNetFile(this.root, resultFolder, partnum);
 	}
@@ -89,8 +131,13 @@ public class NetFileWriter {
 		this.writeBlockToNetFile(result_folder + this.root.get_blif() + ".net", "FPGA_packed_netlist[0]", null);
 		for(N input:this.netlistInputs)add(input);
 		this.writeInputsToNetFile();
+		//Write SLL connections
+		for(String SLL:this.netlistSLLs)add(SLL);
+		this.writeSLLToNetFile();
 		for(N output:this.netlistOutputs){
+
 			for(P terminalOutputPin:output.get_terminal_pins()){
+				
 				if(terminalOutputPin.get_terminal().is_output_type()){
 					add("out:" + terminalOutputPin.get_terminal().toString());
 				}
@@ -117,6 +164,8 @@ public class NetFileWriter {
 	//// WRITERS ////
 	private void writeBlockToNetFile(String name, String instance, String mode){
 		writeToNetFile(Util.tabs(this.tabs));
+		writeToNetFile("<?xml version=\"1.0\"?>");
+		writeToNetFile("\n");
 		writeToNetFile("<block");
 		if(name != null){
 			writeToNetFile(" name=\"");
@@ -153,6 +202,26 @@ public class NetFileWriter {
 		writeToNetFile("</inputs>");
 		writeToNetFile("\n");
 	}
+	
+	private void writeSLLToNetFile() {
+		writeToNetFile(Util.tabs(this.tabs));
+		writeToNetFile("<SLLs>");
+		writeToNetFile("\n");
+		
+		writeToNetFile(Util.tabs(this.tabs + 1));
+		for(String input:this.names){
+			writeToNetFile(input + " ");
+		}
+		writeToNetFile("\n");
+		this.names.clear();
+		
+		writeToNetFile(Util.tabs(this.tabs));
+		writeToNetFile("</SLLs>");
+		writeToNetFile("\n");
+	}
+	
+	
+	
 	private void writeOutputsToNetFile(){
 		writeToNetFile(Util.tabs(this.tabs));
 		writeToNetFile("<outputs>");

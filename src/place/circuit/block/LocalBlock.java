@@ -11,7 +11,6 @@ public class LocalBlock extends AbstractBlock {
 
     public LocalBlock(String name, BlockType type, int index, AbstractBlock parent) {
         super(name, type, index);
-
         this.parent = parent;
         this.parent.setChild(this, index);
     }
@@ -22,7 +21,7 @@ public class LocalBlock extends AbstractBlock {
     }
 
     @Override
-    protected LocalPin createPin(PortType portType, int index) {
+	public LocalPin createPin(PortType portType, int index) {
         return new LocalPin(this, portType, index);
     }
 }

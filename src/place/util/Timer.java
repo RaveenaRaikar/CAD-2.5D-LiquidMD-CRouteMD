@@ -26,7 +26,17 @@ public class Timer {
 
 
     }
+    public void clearStop() throws IllegalStateException {
+        if(this.running) {
+            this.time = this.getCurrentTime() - this.start;
+            this.running = false;
 
+        } else {
+            throw new IllegalStateException("Timer hasn't been started");
+        }
+
+
+    }
     public double getTime() throws IllegalStateException {
         if(!this.running) {
             return this.time / 1e9;

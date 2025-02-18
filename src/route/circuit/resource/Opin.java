@@ -6,8 +6,8 @@ public class Opin extends RouteNode {
 	
 	private boolean used;
 	
-	public Opin(int index, int xlow, int xhigh, int ylow, int yhigh, int n, String portName, int portIndex, IndexedData indexedData, int numChildren) {
-		super(index, xlow, xhigh, ylow, yhigh, n, 1, RouteNodeType.OPIN, 0, 0, indexedData, numChildren);
+	public Opin(int index, int xlow, int xhigh, int ylow, int yhigh, int n, String portName, int portIndex, IndexedData indexedData, String direction, int numChildren) {
+		super(index, xlow, xhigh, ylow, yhigh, n, 1, RouteNodeType.OPIN, 0, 0, indexedData, "none", numChildren);
 		
 		this.portName = portName;
 		this.portIndex = portIndex;

@@ -2,6 +2,7 @@ package place.circuit.pin;
 
 import place.circuit.architecture.PortType;
 import place.circuit.block.GlobalBlock;
+import place.circuit.timing.TimingNode;
 
 public class GlobalPin extends AbstractPin {
 	private String netName;
@@ -26,4 +27,5 @@ public class GlobalPin extends AbstractPin {
     public GlobalPin getSink(int index) {
         return (GlobalPin) super.getSink(index);
     }
+
 }

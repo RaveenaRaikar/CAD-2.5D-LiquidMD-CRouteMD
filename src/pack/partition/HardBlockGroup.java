@@ -36,11 +36,6 @@ public class HardBlockGroup implements Comparable<HardBlockGroup>{
 		//RAM TYPE
 		if(model.get_ram_slices() > 0){
 			this.availablePlacesInOneBlock = model.get_ram_slices();
-		//}
-		//if(model.get_stratixiv_ram_slices_9() > 0){
-		//	this.availablePlacesInOneBlock = model.get_stratixiv_ram_slices_9();
-		//}else if(model.get_stratixiv_ram_slices_144() > 0){
-		//	this.availablePlacesInOneBlock = model.get_stratixiv_ram_slices_144();
 		}else{
 			ErrorLog.print("Unexpected situation");
 		}

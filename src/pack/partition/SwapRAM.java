@@ -201,7 +201,6 @@ public class SwapRAM {
 				}
 			}
 		}
-		//System.out.println("Pin increase: " + minTerminalIncrease);
 		if(from.hasBlock(moveBlock)){
 			moveBlock.move(from, to, this.primitivesInEachHardBlockGroup);
 		}else if(to.hasBlock(moveBlock)){

@@ -77,7 +77,6 @@ public class CGSolver {
         int index;
 
         for(int row = 0; row < dimension; row++) {
-            // TODO: binary search
             index = this.rowPointers.get(row);
             // We suppose the diagonal elements are always non-zero
             while(this.columnIndexes.get(index) != row) {
@@ -114,7 +113,6 @@ public class CGSolver {
     private void sparseMatrixVectorProduct(double[] vector, double[] result) {
         int index = 0;
         for(int row = 0; row < this.vector.length; row++) {
-            // TODO: binary search
             double sum = 0.0;
             int nextRow = row + 1;
             int maxIndex = this.rowPointers.get(nextRow);

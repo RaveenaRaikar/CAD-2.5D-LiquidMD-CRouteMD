@@ -8,10 +8,10 @@ public class CLI {
 
         Logger logger = new Logger();
         CLIOptions options = new CLIOptions(logger);
-
+        
         options.parseArguments(args);
 
         Main main = new Main(options);
-        main.runPlacement();
+        main.runPlacements();
     }
 }

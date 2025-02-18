@@ -3,6 +3,7 @@ package place.circuit.block;
 import java.util.ArrayList;
 import java.util.List;
 
+import place.circuit.architecture.BlockCategory;
 import place.circuit.architecture.BlockType;
 import place.circuit.architecture.PortType;
 import place.circuit.exceptions.FullSiteException;
@@ -12,6 +13,7 @@ import place.circuit.exceptions.UnplacedBlockException;
 import place.circuit.pin.GlobalPin;
 import place.circuit.timing.TimingNode;
 import place.hierarchy.LeafNode;
+import place.placers.analytical.AnalyticalAndGradientPlacer.NetBlock;
 
 public class GlobalBlock extends AbstractBlock {
 
@@ -20,11 +22,19 @@ public class GlobalBlock extends AbstractBlock {
 
     private Macro macro;
     private int macroOffsetY = 0;
+    
+    //TO MARK AS SLL BLOCK
+    private boolean SLLblock;
+    private LeafNode leafNode;   
+    
+    public boolean isSLLSource = false;
+    public boolean isSLLSink = false;
+    
+    public NetBlock netBlock;
+    //Source -- source --SLL -- sink --Sink
 
-    private LeafNode leafNode;
-
-    public GlobalBlock(String name, BlockType type, int index) {
-        super(name, type, index);
+    public GlobalBlock(String name, BlockType type, int index , Boolean SLLblock) {
+        super(name, type, index, SLLblock);
 
         this.leafNode = null;
     }
@@ -40,6 +50,14 @@ public class GlobalBlock extends AbstractBlock {
     	return !(this.leafNode == null);
     }
 
+    
+    public void setSLLStatus(Boolean isSLL) {
+    	this.SLLblock = isSLL;
+    }
+    
+    public boolean getSLLStatus() {
+    	return this.SLLblock;
+    }
     @Override
     public void compact() {
         super.compact();
@@ -57,6 +75,9 @@ public class GlobalBlock extends AbstractBlock {
         return this.site.getRow();
     }
 
+    public int getDie() {
+    	return this.site.getdie();
+    }
     public boolean hasCarry() {
         return this.blockType.getCarryFromPort() != null;
     }
@@ -91,14 +112,25 @@ public class GlobalBlock extends AbstractBlock {
     }
     public void setSite(AbstractSite site) throws PlacedBlockException, FullSiteException {
         if(this.site != null) {
-            throw new PlacedBlockException();
+        	//Get the type of block at this place
+        	if(!this.getBlockStatus(site)) {
+        		throw new PlacedBlockException();
+        	}
         }
-
         this.site = site;
         this.site.addBlock(this);
     }
 
 
+    private boolean getBlockStatus(AbstractSite site) {
+    	boolean blockstatus = false;
+		Site Absite = (Site) site;
+		GlobalBlock block = Absite.getBlock();
+		if(block.getCategory() == BlockCategory.SLLDUMMY) {
+			blockstatus = true;
+		}
+    	return blockstatus;
+    }
     public void addTimingNode(TimingNode node) {
         this.timingNodes.add(node);
     }
@@ -112,7 +144,7 @@ public class GlobalBlock extends AbstractBlock {
     }
 
     @Override
-    protected GlobalPin createPin(PortType portType, int index) {
+	public GlobalPin createPin(PortType portType, int index) {
         return new GlobalPin(this, portType, index);
     }
 }

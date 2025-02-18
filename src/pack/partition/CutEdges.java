@@ -30,8 +30,8 @@ public class CutEdges {
 			if(b.has_atoms()){
 				if(Util.isMoleculeType(b.get_type())){
 					String pinPortName = sourcePin.get_port();
-					String blockName = pinPortName.substring(0, pinPortName.indexOf("."));
-					String portName = pinPortName.substring(pinPortName.indexOf(".") + 1,pinPortName.length());
+					String blockName = pinPortName.substring(0, pinPortName.lastIndexOf("."));
+					String portName = pinPortName.substring(pinPortName.lastIndexOf(".") + 1,pinPortName.length());
 					B atom = null;
 					for(B ab:b.get_atoms()){
 						if(ab.get_name().equals(blockName)){
@@ -62,8 +62,8 @@ public class CutEdges {
 			if(b.has_atoms()){
 				if(Util.isMoleculeType(b.get_type())){
 					String pinPortName = sinkPin.get_port();
-					String blockName = pinPortName.substring(0, pinPortName.indexOf("."));
-					String portName = pinPortName.substring(pinPortName.indexOf(".") + 1,pinPortName.length());
+					String blockName = pinPortName.substring(0, pinPortName.lastIndexOf("."));
+					String portName = pinPortName.substring(pinPortName.lastIndexOf(".") + 1,pinPortName.length());
 					B atom = null;
 					for(B ab:b.get_atoms()){
 						if(ab.get_name().equals(blockName)){
@@ -78,7 +78,6 @@ public class CutEdges {
 						ErrorLog.print("No atom block with name " + blockName + " found");
 					}
 					sinkPinAtomId = "b" + atom.get_number() + "_" + "n" + sinkPin.get_net().get_number() + "_" + portName;
-					//System.out.println("sinkPinAtomId: " + sinkPinAtomId);
 				}else{
 					ErrorLog.print("Unexpected block type: " + b.get_type());
 				}

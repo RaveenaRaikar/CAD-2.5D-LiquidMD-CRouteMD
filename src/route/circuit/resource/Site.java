@@ -1,11 +1,13 @@
 package route.circuit.resource;
 
+import java.util.ArrayList;
+
 import route.circuit.architecture.BlockType;
 
 public class Site {
 
     private final int column, row, height;
-    
+    private final BlockType blockType;
     /***************************************
      * A site can contain multiple instances
      * This is the case for IOs, which have
@@ -16,11 +18,13 @@ public class Site {
     private final Instance[] instances;
     private final int capacity;
     
+    
+    
     public Site(int column, int row, int height, BlockType blockType, int capacity) {
     	this.column = column;
         this.row = row;
         this.height = height;
-        
+        this.blockType = blockType;
     	this.capacity = capacity;
     	this.instances = new Instance[this.capacity];
     	for(int i = 0; i < this.capacity; i++){
@@ -38,13 +42,19 @@ public class Site {
     	return this.height;
     }
     
+    public BlockType getblockType() {
+    	return this.blockType;
+    }
+   
     public Instance getInstance(int n) {
     	if(n > (this.capacity - 1)) {
     		throw new RuntimeException();
-    	}
+    	}   	
     	return this.instances[n];
     }
     
+    
+    //Can we add the source directly???
     public boolean addSource(Source source) {
     	String portName = source.getName();
     	for(Instance instance : this.instances) {
@@ -65,7 +75,8 @@ public class Site {
     	}
     	return false;
     }
-	
+    
+
     @Override
     public int hashCode() {
         // 8191 is a prime number that is larger than any row index can possibly be,

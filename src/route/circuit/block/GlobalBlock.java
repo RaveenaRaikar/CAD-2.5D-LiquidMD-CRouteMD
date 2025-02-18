@@ -14,9 +14,11 @@ public class GlobalBlock extends AbstractBlock {
 
     private Instance siteInstance;
     private ArrayList<TimingNode> timingNodes = new ArrayList<TimingNode>();
+    private int dieNumber;
 
-    public GlobalBlock(String name, BlockType type, int index) {
+    public GlobalBlock(String name, BlockType type, int index, int dieNumber) {
         super(name, type, index);
+        this.dieNumber = dieNumber;
     }
 
     @Override
@@ -35,7 +37,9 @@ public class GlobalBlock extends AbstractBlock {
     public int getRow() {
         return this.siteInstance.getParentSite().getRow();
     }
-
+    public int getDieNumber() {
+    	return this.dieNumber;
+    }
     public boolean hasCarry() {
         return this.blockType.getCarryFromPort() != null;
     }
@@ -53,6 +57,7 @@ public class GlobalBlock extends AbstractBlock {
 
         this.siteInstance = siteInstance;
         this.siteInstance.setBlock(this);
+        
     }
 
 

@@ -107,6 +107,7 @@ class GradientLegalizer extends Legalizer {
     	double stepSize = this.getSettingValue("step_size");
     	
     	if(this.isLastIteration){
+    		System.out.print("\nIs this ever true \n");
     		Timer t = new Timer();
     		t.start();
     		
@@ -132,6 +133,7 @@ class GradientLegalizer extends Legalizer {
     		this.logger.println("\n");
     	}else{
     		if(this.iterationCounter == 0){
+    			
         		this.makeBlocks(blocksStart, blocksEnd, this.numLegalColumns, this.height);
         		this.initializeClusters();
     		}
@@ -148,6 +150,7 @@ class GradientLegalizer extends Legalizer {
     	this.blocks = new ArrayList<>(blocksEnd - blocksStart);
     	for(int b = blocksStart; b < blocksEnd; b++){
     		int blockHeight = this.heights[b];
+    		
     		float offset = (1 - blockHeight) / 2f;
     		int leafNode = this.leafNode[b];
     		this.blocks.add(new Block(b, offset, blockHeight, leafNode, gridWidth, gridHeight));
@@ -156,7 +159,7 @@ class GradientLegalizer extends Legalizer {
     private void initializeBlocks(double stepSize){
 		double x,y;
     	for(Block block:this.blocks){
-    		
+    		//this.logger.print("\nThe block is " + block.toString());
 			if(this.isLastIteration){
 				double interpolation = this.getSettingValue("interpolation");
 				x = (1.0 - interpolation) * this.legalX[block.index] + interpolation * this.linearX[block.index];
@@ -176,6 +179,8 @@ class GradientLegalizer extends Legalizer {
     		block.initialize(x, y, stepSize);
     	}
     }
+    //Clusters are initialised based on the number of leafnodes in the hierarchy file and the blocks in each cluster
+    //are added to the cluster set
     private void initializeClusters(){
     	boolean hasFloatingBlocks = false;
     	Set<Integer> clusterIndex = new HashSet<>();
@@ -188,6 +193,7 @@ class GradientLegalizer extends Legalizer {
     	}
     	
     	this.clusters = new ArrayList<Cluster>();
+    	
     	for(int i = 0; i < clusterIndex.size(); i++){
     		this.clusters.add(new Cluster(i));
     	}
@@ -212,6 +218,7 @@ class GradientLegalizer extends Legalizer {
     }
     
     public void initializeMassMap(){
+    	//this.blocks is all the blocks in the net file marked as "alb"
     	this.initializeMassMap(this.blocks);
     }
     public void initializeMassMap(Cluster cluster){
@@ -227,6 +234,7 @@ class GradientLegalizer extends Legalizer {
     
     //Spreading
     private void doSpreading(){
+    	//Timer start
     	this.spreading.start();
     	
     	int clusterIteration = 0;
@@ -242,7 +250,7 @@ class GradientLegalizer extends Legalizer {
     	this.hierarchicalSpreading.start();
     	while(this.massMap.overlap() / this.blocks.size() > 0.2 && clusterIteration < 20){
     		this.massMap.reset();
-    		
+    		//Timer
     		this.clusterSpreading.start();
     		this.spreadClusters(15);
     		this.addVisual("Spread clusters", this.blocks);
@@ -256,8 +264,7 @@ class GradientLegalizer extends Legalizer {
     		clusterIteration++;
     	}
     	this.hierarchicalSpreading.stop();
-    	
-    	if(clusterIteration >= 20){
+    	if(clusterIteration > 20){
     		this.logger.raise(clusterIteration + " hierachical cluster iterations required");
     	}
     	

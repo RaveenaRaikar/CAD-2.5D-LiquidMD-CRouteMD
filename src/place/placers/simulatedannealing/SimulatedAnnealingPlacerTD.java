@@ -2,6 +2,7 @@ package place.placers.simulatedannealing;
 
 import place.circuit.Circuit;
 import place.circuit.timing.TimingGraph;
+import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
 import place.interfaces.Options;
 import place.visual.PlacementVisualizer;
@@ -9,6 +10,9 @@ import place.visual.PlacementVisualizer;
 import java.util.List;
 import java.util.Random;
 
+
+//TODO : Raveena
+// All functions are executed with dieNumber = 0 for simplicity. 
 public class SimulatedAnnealingPlacerTD extends SimulatedAnnealingPlacer {
 
     private static final String
@@ -17,8 +21,7 @@ public class SimulatedAnnealingPlacerTD extends SimulatedAnnealingPlacer {
         O_CRITICALITY_EXPONENT_END = "criticality exponent end",
         O_INNER_LOOP_RECALCULATES = "inner loop recalculates";
 
-    @SuppressWarnings("deprecation")
-	public static void initOptions(Options options) {
+    public static void initOptions(Options options) {
         SimulatedAnnealingPlacer.initOptions(options);
 
         options.add(
@@ -56,19 +59,19 @@ public class SimulatedAnnealingPlacerTD extends SimulatedAnnealingPlacer {
     private final double tradeOffFactor;
     private final int iterationsBeforeRecalculate;
 
-    public SimulatedAnnealingPlacerTD(Circuit circuit, Options options, Random random, Logger logger, PlacementVisualizer visualizer) {
-        super(circuit, options, random, logger, visualizer);
+    public SimulatedAnnealingPlacerTD(Circuit[] circuitDie, Options options, Random random, Logger logger, PlacementVisualizer[] visualizer, int totalDies, int SLLrows) {
+        super(circuitDie, options, random, logger, visualizer, totalDies, SLLrows);
 
-        this.calculator = new EfficientBoundingBoxNetCC(circuit);
-        this.timingGraph = circuit.getTimingGraph();
+        this.calculator = new EfficientBoundingBoxNetCC(circuitDie[0]);
+        this.timingGraph = circuitDie[0].getTimingGraph();
 
 
         this.tradeOffFactor = this.options.getDouble(O_TRADE_OFF);
         int numRecalculates = this.options.getInteger(O_INNER_LOOP_RECALCULATES);
         if(numRecalculates == 0) {
-            this.iterationsBeforeRecalculate = this.movesPerTemperature + 1;
+            this.iterationsBeforeRecalculate = this.movesPerTemperature[0] + 1;
         } else {
-            this.iterationsBeforeRecalculate = this.movesPerTemperature / numRecalculates;
+            this.iterationsBeforeRecalculate = this.movesPerTemperature[0] / numRecalculates;
         }
 
         this.criticalityExponentStart = this.options.getDouble(O_CRITICALITY_EXPONENT_START);
@@ -89,22 +92,21 @@ public class SimulatedAnnealingPlacerTD extends SimulatedAnnealingPlacer {
     @Override
     protected void initializeSwapIteration() {
 
-        this.startTimer(T_UPDATE_CRITICALITIES);
+
 
         double criticalityExponent;
-        if(this.greedy) {
+        if(this.greedy[0]) {
             criticalityExponent = this.criticalityExponentEnd;
 
         } else {
             criticalityExponent = this.criticalityExponentStart +
-                    (1 - (this.rlim - 1) / (this.initialRlim - 1))
+                    (1 - (this.rlim[0] - 1) / (this.initialRlim - 1))
                     * (this.criticalityExponentEnd - this.criticalityExponentStart);
         }
 
         this.timingGraph.setCriticalityExponent(criticalityExponent);
         this.timingGraph.calculateCriticalities(true);
 
-        this.stopTimer(T_UPDATE_CRITICALITIES);
 
 
         this.updatePreviousCosts();
@@ -137,13 +139,13 @@ public class SimulatedAnnealingPlacerTD extends SimulatedAnnealingPlacer {
     @Override
     protected double getCost() {
         if(this.circuitChanged) {
-            this.startTimer(T_CALCULATE_COST);
+
 
             this.circuitChanged = false;
             this.cachedBBCost = this.calculator.calculateTotalCost();
             this.cachedTDCost = this.timingGraph.calculateTotalCost();
 
-            this.stopTimer(T_CALCULATE_COST);
+
         }
 
         return this.balancedCost(this.cachedBBCost, this.cachedTDCost);

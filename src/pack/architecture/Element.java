@@ -128,13 +128,6 @@ public class Element {
 		}else{
 			ErrorLog.print("Unexpected name for input/ouput port: " + inputPortName + " "+ outputPortName + " | name " + this.name);
 		}
-		//if(!this.outputPorts.containsKey(outputPortName)){
-		//	ErrorLog.print("This block " + this.name + " does not have output port " + outputPortName);
-			
-		//}else if(!this.inputPorts.containsKey(inputPortName)){
-		//	ErrorLog.print("This block " + this.name + " does not have input port " + inputPortName);
-		//}
-		//this.clockToOutput.put(outputPortName, delay);
 	}
 	
 	public int get_delay(String input, String output){
@@ -205,36 +198,14 @@ public class Element {
 	}
 	public void set_clock(Port clockPort){
 		if(this.type.equals("pb_type")){
-			//if(this.clockPorts == null){
-				//this.clockPort = clockPort;
-				this.clockPorts.put(clockPort.get_name(), clockPort);
-			//}else{
-			//	ErrorLog.print("This block " + this.name + " already has a clock port");
-			//}
+			this.clockPorts.put(clockPort.get_name(), clockPort);
 		}else{
 			ErrorLog.print("Type " + this.type + " should not have clock ports");
 		}
 		this.portOrder.add(clockPort.get_name());
 	}
 	
-	/*
-	 * public void set_clock(Port clockPort){ if(this.type.equals("pb_type")){
-	 * if(this.clockPort == null){ this.clockPort = clockPort; }else{
-	 * ErrorLog.print("This block " + this.name + " already has a clock port"); }
-	 * }else{ ErrorLog.print("Type " + this.type + " should not have clock ports");
-	 * } this.portOrder.add(clockPort.get_name()); }
-	 */
 	public void add_interconnect_line(String line){
-	//	Output.println("this.has_parent is  "+ this.has_parent() );
-	//	Output.println("pb_type is  "+ this.type.equals("pb_type") );
-		//Output.println("The parent is " + parent.get_name());
-	//	Output.println("The model name is " +this.name );
-		//if(this.type.equals("pb_type") && this.has_parent()){
-		//	ErrorLog.print("pb_type " + this.name + " has interconnect lines => " + line);
-		//}
-	//	if(!this.has_parent()){
-	//		ErrorLog.print("pb_type " + this.name + " has interconnect lines => " + line);
-	//	}
 		this.interconnectLines.add(line);
 	}
 	public void set_parent(Element parent){
@@ -243,7 +214,6 @@ public class Element {
 	public void add_child(Element child){
 		if(!this.children.contains(child)){
 			this.children.add(child);
-			//Output.println("this.children.add(child) " + this.children.add(child));
 		}else{
 			ErrorLog.print("Child already added");
 		}
@@ -284,7 +254,6 @@ public class Element {
 		boolean isInput = false;
 		boolean isOutput = false;
 		boolean isClock = false;
-		//Output.println("The port is " + portName);
 		if(this.inputPorts.containsKey(portName)) isInput = true;
 		if(this.outputPorts.containsKey(portName)) isOutput = true;
 		if(this.has_clock()){
@@ -353,7 +322,6 @@ public class Element {
 	public void remove_child(Element child){
 		if(this.children.contains(child)){
 			this.children.remove(child);
-		//	Output.println("Children node " + this.name);
 		}else{
 			ErrorLog.print("This block " + this.name + " does not contain child " + child.get_name());
 		}
@@ -636,7 +604,6 @@ public class Element {
 		}else if(this.name.equals("mac_mult_comb")){
 			macMultType = "comb";
 		}else if(this.name.equals("dsp_pb")){
-	//	}else if(this.name.equals("half_DSP_normal")){
 			halfDSP = true;
 		}else{
 			macOutType = this.get_name().split("\\.")[0];
@@ -878,17 +845,9 @@ public class Element {
 		dummyModel.add("<model name=\"" + this.name + "_dummy\">");
 		dummyModel.add("<input_ports>");
 		
-		//If clock port
-		//Add inputs with the clock value
-		//Add the clock as well
-		//else
-		//Add combinational port
-		///Raveena
 		if(this.has_clock()) {
 			for(String clock:this.clockPorts.keySet()){ 
 				for(String input:this.inputPorts.keySet()){
-					//dummyModel.add("<port name=\"" + input + "\"/>");
-					//Need to add the clocking status of the port
 					dummyModel.add("<port name=\"" + input + "\"" + " " + "clock=\"" + clock + "\"/>");
 				}
 				dummyModel.add("<port name=\"" + clock + "\" is_clock=\"1\"/>");
@@ -896,26 +855,14 @@ public class Element {
 		}
 		else {
 			for(String input:this.inputPorts.keySet()){
-				//dummyModel.add("<port name=\"" + input + "\"/>");
-				//Need to add the clocking status of the port
 				dummyModel.add("<port name=\"" + input + "\"/>");
 			}
 		}
 		
-		/*
-		 * for(String input:this.inputPorts.keySet()){ //dummyModel.add("<port name=\""
-		 * + input + "\"/>"); //Need to add the clocking status of the port
-		 * dummyModel.add("<port name=\"" + input + "\"/>"); } if(this.has_clock()){
-		 * dummyModel.add("<port name=\"" + this.clockPort.get_name() +
-		 * "\" is_clock=\"1\"/>"); }
-		 */
+
 		dummyModel.add("</input_ports>");
 		dummyModel.add("<output_ports>");
-		
-		//IF CLOCK PORT
-		//ADD THE CLOCK VALUE TO THE OUTPUT PORT 
-		//ELSE
-		//AS IS
+
 		if(this.has_clock()) {
 			for(String clock:this.clockPorts.keySet()){ 
 				for(String output:this.outputPorts.keySet()){ 
@@ -928,10 +875,7 @@ public class Element {
 				dummyModel.add("<port name=\"" + output + "\"/>"); 
 				}
 		}
-		/*
-		 * for(String output:this.outputPorts.keySet()){ dummyModel.add("<port name=\""
-		 * + output + "\"/>"); }
-		 */
+
 		dummyModel.add("</output_ports>");
 		dummyModel.add("</model>");
 		

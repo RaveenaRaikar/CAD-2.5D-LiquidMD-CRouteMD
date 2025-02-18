@@ -6,6 +6,7 @@ import java.util.List;
 import route.circuit.architecture.DelayTables;
 import route.circuit.block.GlobalBlock;
 import route.circuit.pin.AbstractPin;
+import route.circuit.timing.TimingNode.Position;
 
 public class TimingNode {
 
@@ -38,6 +39,8 @@ public class TimingNode {
     private boolean hasSourceClockDomains = false;
     private boolean hasSinkClockDomains = false;
     
+    private boolean sllNode = false;
+   
     public final float clockDelay;
 
     TimingNode(GlobalBlock globalBlock, AbstractPin pin, Position position, int clockDomain, float clockDelay) {
@@ -65,6 +68,14 @@ public class TimingNode {
     
     public int getClockDomain() {
     	return this.clockDomain;
+    }
+    
+    public void setSLLNodeStatus() {
+    	this.sllNode = true;
+    }
+    
+    public boolean getSLLNodeStatus() {
+    	return this.sllNode;
     }
 
     private void addSource(TimingNode source, TimingEdge edge) {
@@ -102,6 +113,7 @@ public class TimingNode {
     public List<TimingEdge> getSourceEdges() {
         return this.sourceEdges;
     }
+   
     public List<TimingEdge> getSinkEdges() {
         return this.sinkEdges;
     }
@@ -136,7 +148,7 @@ public class TimingNode {
     boolean hasArrivalTime() {
     	return this.hasArrivalTime;
     }
-    float getArrivalTime() {
+    public float getArrivalTime() {
     	return this.arrivalTime;
     }
 	float recursiveArrivalTime(int sourceClockDomain) {
@@ -157,6 +169,14 @@ public class TimingNode {
 		}
 	}
 
+	public void printPath() {
+		float maxArrivalTime = 0;
+		for(TimingEdge edge:this.sourceEdges) {
+			maxArrivalTime = edge.getSource().getArrivalTime() + edge.getTotalDelay();
+			System.out.print("\nThe source is " + edge.getSource() + " and the sink is " + edge.getSink() + " and the arrival time is " + edge.getSource().getArrivalTime() + " edge delay is " + edge.getTotalDelay());
+			edge.getSource().printPath();
+		}
+	}
 	
 	//Required time
     void resetRequiredTime() {
@@ -254,12 +274,12 @@ public class TimingNode {
     	} else {
 			for(TimingEdge sourceEdge : this.sourceEdges) {
 				TimingNode sourceNode = sourceEdge.getSource();
-				
+//				
 				boolean[] sourceNodeClockDomains = sourceNode.setSourceClockDomains();
 				
 				for(int clockDomain = 0; clockDomain < this.numClockDomains; clockDomain++) {
 					if(sourceNodeClockDomains[clockDomain]) {
-						this.hasClockDomainAsSource[clockDomain] = true;
+						this.hasClockDomainAsSource[clockDomain] = true;						
 					}
 				}
 			}
@@ -269,6 +289,7 @@ public class TimingNode {
     }
     public boolean[] setSinkClockDomains() {
     	if(this.hasSinkClockDomains) {
+ 
     		return this.hasClockDomainAsSink;
     		
     	}else if(this.position == Position.LEAF) {
@@ -277,17 +298,44 @@ public class TimingNode {
     		
     		return this.hasClockDomainAsSink;
     	} else {
+    		
 			for(TimingEdge sinkEdge : this.sinkEdges) {
 				TimingNode sinkNode = sinkEdge.getSink();
-
-				boolean[] sinkNodeClockDomains = sinkNode.setSinkClockDomains();
-				
-				for(int clockDomain = 0; clockDomain < this.numClockDomains; clockDomain++) {
-					if(sinkNodeClockDomains[clockDomain]) {
-						this.hasClockDomainAsSink[clockDomain] = true;
+				if(!sinkNode.getPin().getSLLSourceStatus()) {
+					boolean[] sinkNodeClockDomains = sinkNode.setSinkClockDomains();
+					
+					for(int clockDomain = 0; clockDomain < this.numClockDomains; clockDomain++) {
+						if(sinkNodeClockDomains[clockDomain]) {
+							this.hasClockDomainAsSink[clockDomain] = true;
+						}
 					}
 				}
 			}
+	    	this.hasSinkClockDomains = true;
+	    	return this.hasClockDomainAsSink;
+    	}
+    }
+    public boolean[] setSinkClockDomainsSystem() {
+    	if(this.hasSinkClockDomains) {
+    		return this.hasClockDomainAsSink;
+    		
+    	}else if(this.position == Position.LEAF) {
+    		this.hasClockDomainAsSink[this.clockDomain] = true;
+    		this.hasSinkClockDomains = true;
+    		
+    		return this.hasClockDomainAsSink;
+    	} else {
+    	
+			for(TimingEdge sinkEdge : this.sinkEdges) {
+				TimingNode sinkNode = sinkEdge.getSink();
+
+					boolean[] sinkNodeClockDomains = sinkNode.setSinkClockDomainsSystem();
+					for(int clockDomain = 0; clockDomain < this.numClockDomains; clockDomain++) {
+						if(sinkNodeClockDomains[clockDomain]) {
+							this.hasClockDomainAsSink[clockDomain] = true;
+						}
+					}
+				}
 	    	this.hasSinkClockDomains = true;
 	    	return this.hasClockDomainAsSink;
     	}

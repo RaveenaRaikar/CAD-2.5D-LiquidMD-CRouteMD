@@ -1,6 +1,7 @@
 package place.interfaces;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -41,9 +42,21 @@ public class Options {
     public void set(String name, Object value) throws IllegalArgumentException, ClassCastException {
         Option option = this.getOption(name);
         option.setValue(value);
+
     }
 
-    void set(String name, String value) throws NumberFormatException, IllegalArgumentException {
+    public void set(String name, ArrayList<String> fileNames) throws IllegalArgumentException, ClassCastException {
+        Option option = this.getOption(name);
+
+        ArrayList<File> files = new ArrayList<File>();
+        for (int i = 0; i < fileNames.size(); i++){
+            String filename = fileNames.get(i);
+            files.add(new File(filename));
+        }
+        option.setValue(files);
+    }
+
+    public void set(String name, String value) throws NumberFormatException, IllegalArgumentException {
         Option option = this.getOption(name);
         Class<? extends Object> optionClass = option.getType();
 
@@ -132,6 +145,11 @@ public class Options {
         return (File) this.get(name);
     }
 
+    public ArrayList<File> getFiles(String name) throws ClassCastException, OptionNotSetException {
+        
+		ArrayList<File> files = (ArrayList<File>)this.get(name);
+        return files;
+    }
 
     public boolean isRequired(String name) {
         return this.options.get(name).isRequired();

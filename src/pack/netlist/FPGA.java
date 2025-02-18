@@ -8,21 +8,9 @@ import java.util.Map;
 
 import pack.architecture.Architecture;
 import pack.main.Simulation;
-//Stratixiv architecture
-//LAB <loc priority="1" type="fill"/>								=> 1
-//M9K <loc priority="5" repeat="26" start="5" type="col"/>			=> 2
-//M114K <loc priority="10" repeat="43" start="33" type="col"/>		=> 3
-//DSP <loc type="col" start="6" repeat="40" priority="15"/>			=> 4
-//PLL <loc priority="90" start="1" type="col"/>						=> 5
 import pack.partition.Partition;
 
-//Huawei/KOIOS architecture
-/*<perimeter type="io" priority="101"/>
-<corners type="EMPTY" priority="102"/>
-<fill type="clb" priority="10"/>                                        => 1
-<col type="dsp_top" startx="6" starty="1" repeatx="16" priority="20"/>	=> 3
-<col type="memory" startx="2" starty="1" repeatx="16" priority="20"/>	=> 2
-*/
+
 
 public class FPGA {
 //	private Architecture architecture;
@@ -33,8 +21,6 @@ public class FPGA {
 	private int sizeY;
 	private ArrayList<String> lines;
 	private int availableLAB;
-	//private int availableM9K;
-	//private int availableM144K;
 	private int availableDSP;
 	private int availablePLL;
 	private int availableM20K;
@@ -51,20 +37,10 @@ public class FPGA {
 	private int RAMpriority;
 	private int DSPpriority;
 	
-	public FPGA(){//TODO get the properties from architecture file
+	public FPGA(){
 		this.maxSize = 500;
 		this.arch = new int[this.maxSize];
-		
-//		for(int i=0;i<this.maxSize;i++){
-//			this.arch[i] = 1;//LAB
-//		}
-//		for(int i=2;i<this.maxSize;i+=16){
-//			this.arch[i] = 2;//"M20K"
-//		}
-//		for(int i=6;i<this.maxSize;i+=16){
-//			this.arch[i] = 3;//"DSP"
-//		}
-
+	
 		
 		this.sizeX = 0;
 		this.sizeY = 0;
@@ -74,10 +50,7 @@ public class FPGA {
 	public void set_size(int sizeX,int sizeY){
 		this.sizeX = sizeX;
 		this.sizeY = sizeY;
-		//HUAWEI : THE ASPECT RATIO IS 1.5
-		if(this.sizeX != (int)Math.round(this.sizeY * 1.5)){
-			ErrorLog.print("Size X should be equal to " + (int)Math.round(this.sizeY * 1.5) + " but is equal to " + this.sizeX);
-		 }
+
 		if(this.sizeX > this.maxSize){
 			ErrorLog.print("Maximum sizeX of " + this.maxSize + " exceeded => " + this.sizeX);
 		}
@@ -128,8 +101,6 @@ public class FPGA {
 	}
 	private void update_available_blocks(){
 		this.availableLAB = 0;
-		//this.availableM9K = 0;
-		//this.availableM144K = 0;
 		this.availableM20K = 0;
 		this.availableDSP = 0;
 		this.availablePLL = 0;
@@ -137,7 +108,6 @@ public class FPGA {
 		for(int a=1;a<=this.sizeX;a++){
 			switch (this.arch[a]) {
 				case 1: this.availableLAB += this.sizeY; break;
-			//	case 2: this.availableM9K += this.sizeY; break;
 				case 2: this.availableM20K += Math.floor(this.sizeY*(1/(double)this.RAMht)); break;
 				case 3: this.availableDSP += Math.floor(this.sizeY*(1/(double)this.DSPht)); break;
 				case 4: this.availablePLL += this.sizeY; break;
@@ -157,10 +127,7 @@ public class FPGA {
 	public int M20K(){
 		return this.availableM20K;
 	}
-	/*
-	public int M144K(){
-		return this.availableM144K;
-	}*/
+
 	public int DSP(){
 		return this.availableDSP;
 	}

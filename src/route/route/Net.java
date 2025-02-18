@@ -17,6 +17,7 @@ public class Net {
 	private int id; //Unique ID, is ID of the first connection in the net, which is also unique.
 	private final List<Connection> connections;
 	public final int fanout;
+	public final int sllFanout;
 	
 	private final short boundingBoxRange;
 	public final short x_min_b;
@@ -26,16 +27,18 @@ public class Net {
 	
 	public final float x_geo;
 	public final float y_geo;
-	
+	public final String netName;
 	public final int hpwl;
 	
+
 	private Opin fixedOpin;
 	
-	public Net(List<Connection> net, short boundingBoxRange) {
+	public Net(String name, List<Connection> net, short boundingBoxRange, int sllFanout) {
 		this.id = net.get(0).id;
 		this.connections = net;
 		this.fanout = net.size();
-		
+		this.sllFanout = sllFanout;
+		this.netName = name;
 		this.boundingBoxRange = boundingBoxRange;
 		
 		List<Short> xCoordinatesBB = new ArrayList<>();
@@ -76,14 +79,13 @@ public class Net {
 		//Sink pins of net
 		for(Connection connection : net) {
 			Sink sink = (Sink) connection.sinkRouteNode;
-			
 			if(sink.xlow != sink.xhigh) {
 				xGeomeanSum += sink.centerx;
 				
 				xCoordinatesBB.add(sink.xlow);
 				xCoordinatesBB.add(sink.xhigh);
 			} else {
-				xGeomeanSum += sink.xlow;
+				xGeomeanSum += sink.xlow; 
 				xCoordinatesBB.add(sink.xlow);
 			}
 			if(sink.ylow != sink.yhigh) {
@@ -94,6 +96,12 @@ public class Net {
 			} else {
 				yGeomeanSum += sink.ylow;
 				yCoordinatesBB.add(sink.ylow);
+			}
+			if(connection.isCrossingSLL()) {
+				RouteNode sllWire = connection.sllWireNode;
+				xCoordinatesBB.add(sllWire.xlow); 
+				yCoordinatesBB.add(sllWire.ylow);
+				yCoordinatesBB.add(sllWire.yhigh);
 			}
 		}
 		
@@ -120,12 +128,12 @@ public class Net {
 			}
 		}
 		
+
 		
 		this.hpwl = (x_max - x_min + 1) + (y_max - y_min + 1);
 		
 		this.x_geo = xGeomeanSum / (1 + this.fanout);
 		this.y_geo = yGeomeanSum / (1 + this.fanout);
-		
 		this.x_max_b = (short) (x_max + this.boundingBoxRange);
 		this.x_min_b = (short) (x_min - this.boundingBoxRange);
 		this.y_max_b = (short) (y_max + this.boundingBoxRange);
@@ -154,6 +162,10 @@ public class Net {
 			}
 		}
 		return wireLength;
+	}
+	
+	public String getName() {
+		return this.netName;
 	}
 	
 	public List<Connection> getConnections() {

@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 
 import pack.architecture.Architecture;
 import pack.netlist.B;
@@ -24,7 +26,6 @@ import pack.util.Util;
 
 public class HMetis {
 	private Netlist netlist;
-//	private PartitionNetlist partnetlist;
 	private int size;
 	private Param param;
 	
@@ -69,8 +70,6 @@ public class HMetis {
 		this.metisIt = metisIt;
 		this.diePartn = diePartn;
 		
-		//Output.println("Die partitioning in hmetis is " + this.diePartn);
-		
 		this.edges = new ArrayList<Edge>();
 		this.criticalEdges = new ArrayList<Edge>();
 		this.numberOfEdges = 0;
@@ -79,35 +78,7 @@ public class HMetis {
 		this.isFinished = false;
 	}
 
-/*	public HMetis(PartitionNetlist partnetlist, int thread, int metisIt, Param param, boolean diePartn){
-		this.partnetlist = partnetlist;
-		this.size = this.partnetlist.atom_count();
-		this.param = param;
-		
-		this.result = new Part[param.nparts()];
-		for(int i=0; i<param.nparts(); i++){
-			this.result[i] = new Part();
-			this.result[i].setPartNumber(i);
-		}
-		this.blocks = new ArrayList<B>();
-		for(B b:partnetlist.get_blocks()){
-			this.blocks.add(b);
-		}
-		
-		this.thread = thread;
-		this.metisIt = metisIt;
-		this.diePartn = diePartn;
-		
-		//Output.println("Die partitioning in hmetis is " + this.diePartn);
-		
-		this.edges = new ArrayList<Edge>();
-		this.criticalEdges = new ArrayList<Edge>();
-		this.numberOfEdges = 0;
-		this.numberOfCriticalEdges = 0;
-		
-		this.isFinished = false;
-	}
-	*/
+
 	public Netlist getNetlist(){
 		return this.netlist;
 	}
@@ -120,10 +91,6 @@ public class HMetis {
 
 	public boolean isRunning(){
 		if(this.isRunning == true){
-			///Output.println("the exit value is " + this.proc.exitValue());
-			//this.proc.exitValue();
-			//Output.println("The exit value is " + this.proc.exitValue() );
-			//return true;
 			try {
 				this.proc.exitValue();
 		        this.isRunning = false;
@@ -141,18 +108,13 @@ public class HMetis {
 	}
 	
     public void startRun(){
-    	//Output.println("The value of partitioning in start run is " + this.diePartn);
     	this.blockMap = new HashMap<Integer,Integer>();
     	this.makeBlockMap();
-    	//Output.println("The value of partitioning in before write to file is " + this.diePartn);
     	this.writeToFile();
-    	//Output.println("The value of partitioning in after write to file is " + this.diePartn);
     	if(this.diePartn) {
     		this.run_diehMetis();
-    	//	Output.println("rundiehmetis");
     	}else {
     		this.run_hMetis();
-    	//	Output.println("run hmetis" );
     	}
     	
     }
@@ -169,12 +131,13 @@ public class HMetis {
     }
     private void readHMetisTerminalOutput(){
 		try {
-			//BufferedReader hMetisOutput = new BufferedReader(new InputStreamReader(this.proc.getInputStream()));
+
 			BufferedReader hMetisOutput = new BufferedReader(new InputStreamReader(this.proc.getInputStream()));
 			String line = hMetisOutput.readLine();
-			//Output.println("I am here" + line);
+
 			while(line != null){
 				if(line.contains("Hyperedge Cut:")){
+					System.out.print(line);
 					String cut = line.replace("(minimize)", "");
 					cut = cut.replace("Hyperedge Cut:", "");
 					cut = cut.replace("\t", "");
@@ -199,19 +162,18 @@ public class HMetis {
     }
 	private void writeToFile(){
 		String file_name;
-		//Output.println("The value of die part in write to file is " + this.diePartn);
+
 		if(this.diePartn == true)
 		{
-			//Output.println("top is printed");
 			file_name = this.param.getHMetisFolder() + "files/" + this.netlist.get_blif() + "_" + this.param.getSimulationID() + "_" + this.thread + "_top";
 		}else 
 		{
-			//Output.println("multi is printed");
+
 			file_name = this.param.getHMetisFolder() + "files/" + this.netlist.get_blif() + "_" + this.param.getSimulationID() + "_" + this.thread;
 		}
 		try {
+			
 			BufferedWriter bw = new BufferedWriter(new FileWriter(file_name));
-			//BufferedWriter bw = new BufferedWriter(new FileWriter(this.param.getHMetisFolder() + "files/" + this.netlist.get_blif() + "_" + this.param.getSimulationID() + "_" + this.thread));
 			int numberOfInternalNets = 0;
 			for(N n:this.netlist.get_nets()){
 				if(n.add_net_to_hmetis_partitioning(this.param.maxFanout())){
@@ -236,7 +198,7 @@ public class HMetis {
 			//NETS
 			for(N n:this.netlist.get_nets()){
 				if(n.add_net_to_hmetis_partitioning(this.param.maxFanout())){
-					//Output.println("I am writing hMETIS nets");
+					
 					this.writeConnections(n, bw);
 				}
 			}
@@ -248,7 +210,7 @@ public class HMetis {
 					ErrorLog.print("Error in the block numbering");
 				}
 
-				bw.write(1 + "");//TODO Should we use 1 or the atom count?
+				bw.write(1 + "");
 				bw.newLine();
 
 				blockNumber += 1;
@@ -314,7 +276,6 @@ public class HMetis {
 	}
 	private void run_hMetis(){
 		try{
-			//Output.println("The value of diePart in runhmetis is " + this.diePartn);
         	ProcessBuilder pb = new ProcessBuilder(this.param.getHMetisLine(this.thread, this.diePartn));	
         	this.proc = pb.start();
 
@@ -331,7 +292,6 @@ public class HMetis {
         	int exitvalue = this.proc.waitFor();
         	if(exitvalue == 0)
         	{
-        	//	Output.println("Success for die partitioning");
         		this.isRunning = false;
         	}
 
@@ -340,7 +300,6 @@ public class HMetis {
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
-		//this.isRunning = true;
 	}
 	public int numberOfCutEdges(){
 		return this.numberOfcutEdges;
@@ -356,10 +315,10 @@ public class HMetis {
 			Info.add("hmetis", "atom_count" + "\t" + this.netlist.atom_count() + "\t" + "runtime" + "\t" + Util.str(this.partitioningRuntime).replace(".",","));	
 		}
 		String resultFile;
-		//String resultFile = this.param.getHMetisFolder() + "files/" + this.netlist.get_blif() + "_" + this.param.getSimulationID() + "_" + this.thread + ".part." + this.param.nparts();
 		if(diePartn == true)
 		{
 			resultFile = this.param.getHMetisFolder() + "files/" + this.netlist.get_blif() + "_" + this.param.getSimulationID() + "_" + this.thread + "_top" + ".part." + this.param.nparts();
+			System.out.print("The result file is " + resultFile);
 		}
 		else {
 			resultFile = this.param.getHMetisFolder() + "files/" + this.netlist.get_blif() + "_" + this.param.getSimulationID() + "_" + this.thread + ".part." + this.param.nparts();
@@ -391,11 +350,7 @@ public class HMetis {
 			e.printStackTrace();
 		}
 		
-		//Delete the files
-//		File metisNetlistFile = new File(this.param.getHMetisFolder() + "files/" + this.netlist.get_blif() + "_" + this.param.getSimulationID()  + "_" + this.thread);
-//		metisNetlistFile.delete();
-//		File metisResultFile = new File(this.param.getHMetisFolder() + "files/" + this.netlist.get_blif() + "_" + this.param.getSimulationID()  + "_" + this.thread + ".part." + this.param.nparts());
-//		metisResultFile.delete();
+
 	}
 	public int getThreadNumber(){
 		return this.thread;
@@ -420,10 +375,31 @@ public class HMetis {
 				}
 			}
 		}
-		printAllEdges=false;
+		printAllEdges=true;
 		if(!printAllEdges && !result.isEmpty())Output.println("\t\t\t" + "hMetis iteration " + this.metisIt + " | " + Util.fill(globalConnectionsCut, 3) + " global edges cut" + " | " + Util.fill(localConnectionsCut, 3) + " local edges cut");
 		return result;
 	}
+	
+	
+	public Set<String> cutSLLEdges(){
+		Set<String> result = new HashSet<String>();
+		for(N n:this.netlist.get_nets()){
+			if(n.has_source()) {
+				P sourcePin = n.get_source_pin();
+				
+				for(P sinkPin:n.get_sink_pins()) {
+					if(sourcePin.get_block().get_part()!= sinkPin.get_block().get_part()) {
+						result.add(n.get_name());
+
+					}
+				}
+			}
+		}
+		
+		return result;
+	}
+
+	
 	public void increasePinWeightOnPadWithCutEdge(Architecture arch){
 		Timing t = new Timing();
 		t.start();

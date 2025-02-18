@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import place.circuit.Circuit;
@@ -94,6 +95,7 @@ public class HardblockConnectionLegalizer{
 		this.logger.println();
 
 		//Make all objects and connect them
+
 		this.blocks = new Block[legalX.length];
 		this.nets = new Net[numNets];
 		this.makeNets(placerNets, maxFanout);
@@ -135,6 +137,7 @@ public class HardblockConnectionLegalizer{
 	}
 	private void connectNetsAndBlocks(List<AnalyticalAndGradientPlacer.Net> placerNets, int maxFanout){
 		int l = 0;
+
 		for(int i = 0; i < placerNets.size(); i++){
 			int fanout = placerNets.get(i).blocks.length;
 			if(fanout > maxFanout){
@@ -142,6 +145,7 @@ public class HardblockConnectionLegalizer{
 			}else{
 				Net legalizerNet = this.nets[l];
 				for(NetBlock block:placerNets.get(i).blocks){
+		
 					Block legalizerBlock = this.blocks[block.blockIndex];
 
 					legalizerNet.addBlock(legalizerBlock);
@@ -154,6 +158,7 @@ public class HardblockConnectionLegalizer{
 
 	//ADD BLOCK TYPE
 	public void addBlocktype(BlockType blockType, int firstBlockIndex, int lastBlockIndex) throws OffsetException{
+
 		Block[] legalizeBlocks = this.getLegalizeBlocks(firstBlockIndex, lastBlockIndex);
 		Net[] legalizeNets = this.getLegalizeNets(legalizeBlocks);
 
@@ -166,6 +171,7 @@ public class HardblockConnectionLegalizer{
 			Block legalizeBlock = this.blocks[i];
 			
 			//Offset test -> hard blocks have no offset
+
 			if(legalizeBlock.offset != 0) throw new OffsetException();
 			legalizeBlocks[i - firstBlockIndex] = legalizeBlock;
 		}
@@ -212,7 +218,7 @@ public class HardblockConnectionLegalizer{
 		List<Integer> blockTypeColumns = this.circuit.getColumnsPerBlockType(this.blockType);
 		
 		int numColumns = blockTypeColumns.size();
-		int numRows = (int) Math.floor(this.gridHeigth / this.blockType.getHeight());
+		int numRows = (int) Math.floor((this.gridHeigth - 4) / this.blockType.getHeight());
         
 		Block[] legalizeBlocks = this.blocksPerBlocktype.get(this.blockType);
 		Net[] legalizeNets = this.netsPerBlocktype.get(this.blockType);
@@ -222,7 +228,7 @@ public class HardblockConnectionLegalizer{
 			int column = blockTypeColumns.get(c);
 			Site[] sites = new Site[numRows];
 			for(int r = 0; r < numRows; r++){
-				int row = 1 + r * this.blockType.getHeight();
+				int row = 2 + r * this.blockType.getHeight();
 				sites[r] = new Site(column, row, this.blockType.getHeight());
 			}
 			columns[c] = new Column(c, column, sites);
@@ -284,22 +290,31 @@ public class HardblockConnectionLegalizer{
 	public void legalizeIO(BlockType blockType, double quality){
 		this.blockType = blockType;
 		
-		int siteCapacity = 2;
+		int siteCapacity = 8;
+		int CurrentDie = this.circuit.getCurrentDie();
 		
 		Block[] legalizeBlocks = this.blocksPerBlocktype.get(this.blockType);
 		Net[] legalizeNets = this.netsPerBlocktype.get(this.blockType);
-		Site[] legalizeSites = new Site[2 * (this.gridWidth + this.gridHeigth) * siteCapacity];
+		Site[] legalizeSites = new Site[ ((this.gridWidth-2) + (2*(this.gridHeigth - 2))) * siteCapacity];
 		int l = 0;
-		for(int i = 1; i <= this.gridWidth; i++){
+
+
+		for(int i = 1; i < this.gridHeigth - 1; i++){
 			for(int p = 0; p < siteCapacity; p++){
-				legalizeSites[l++] = new Site(i, 0, this.blockType.getHeight());
-				legalizeSites[l++] = new Site(i, this.gridHeigth + 1, this.blockType.getHeight());
+				legalizeSites[l++] = new Site(1, i, this.blockType.getHeight());
+				legalizeSites[l++] = new Site(this.gridWidth - 2, i, this.blockType.getHeight());
 			}
 		}
-		for(int i = 1; i <= this.gridHeigth; i++){
+			
+		for(int i = 1; i < this.gridWidth - 1; i++){
 			for(int p = 0; p < siteCapacity; p++){
-				legalizeSites[l++] = new Site(0, i, this.blockType.getHeight());
-				legalizeSites[l++] = new Site(this.gridWidth + 1, i, this.blockType.getHeight());
+				if(CurrentDie == 0) {
+					
+					legalizeSites[l++] = new Site(i, 1, this.blockType.getHeight());
+				}else if(CurrentDie == 1) {
+					legalizeSites[l++] = new Site(i, this.gridHeigth - 2, this.blockType.getHeight());
+				}
+
 			}
 		}
 		
@@ -313,11 +328,13 @@ public class HardblockConnectionLegalizer{
 			Site bestFreeSite = null;
 			
 			for(Site site:legalizeSites){
-				if(!site.hasBlock()){
-					double cost = (site.column - block.linearX) * (site.column - block.linearX) + (site.row - block.linearY) * (site.row - block.linearY);
-					if(cost < minimumCost){
-						minimumCost = cost;
-						bestFreeSite = site;
+				if(site != null) {
+					if(!site.hasBlock()){
+						double cost = (site.column - block.linearX) * (site.column - block.linearX) + (site.row - block.linearY) * (site.row - block.linearY);
+						if(cost < minimumCost){
+							minimumCost = cost;
+							bestFreeSite = site;
+						}
 					}
 				}
 			}
@@ -330,6 +347,70 @@ public class HardblockConnectionLegalizer{
 		//Anneal the IOs to find a good placement
 		this.hardblockAnneal.doAnneal(legalizeBlocks, legalizeSites, quality);
 		
+		this.updateLegal(legalizeBlocks);
+		this.cleanData();
+	}
+	
+	
+	//Legalize SLL block
+	public void legalizeSLL(BlockType blockType, double quality){
+		this.blockType = blockType;
+		
+		int CurrentDie = this.circuit.getCurrentDie();
+		int sllRows = this.circuit.getSLLrows();
+
+		Block[] legalizeBlocks = this.blocksPerBlocktype.get(this.blockType);
+		Net[] legalizeNets = this.netsPerBlocktype.get(this.blockType);
+		Site[][] legalizeSites = new Site[this.gridWidth + 1][this.gridHeigth + 1];
+		int l = 0;
+
+		int rowStart, rowEnd = 0;
+		if(CurrentDie ==0) {
+			rowStart = this.gridHeigth - sllRows - 1;
+			rowEnd = this.gridHeigth + 1;
+		}else {
+			rowStart = 0;
+			rowEnd = sllRows;
+		}
+		for(int cols = 1; cols < this.gridWidth; cols++) {
+			for(int rows = rowStart; rows<rowEnd; rows++) {
+				legalizeSites[cols][rows] = new Site(cols, rows, this.blockType.getHeight());
+			}
+		}
+
+
+	
+	
+		//Update the coordinates of the current hard block type based on the current linear placement
+		this.initializeLegalization(legalizeNets);
+		
+		//Update the coordinates of the io blocks based on the minimal displacement from current linear placement
+		for(Block block:legalizeBlocks){
+			
+			double minimumCost = Double.MAX_VALUE;
+			Site bestFreeSite = null;
+			
+			for(int cols = 1; cols < this.gridWidth; cols++) {
+				for(int rows = rowStart; rows<rowEnd; rows++) {
+					Site site = legalizeSites[cols][rows];
+					if(!site.hasBlock()){
+						double cost = (site.column - block.linearX) * (site.column - block.linearX) + (site.row - block.linearY) * (site.row - block.linearY);
+						if(cost < minimumCost){
+							minimumCost = cost;
+							bestFreeSite = site;
+						}
+					}
+				}
+			}
+			
+
+			block.setSite(bestFreeSite);
+			bestFreeSite.setBlock(block);
+			
+			block.setLegal(bestFreeSite.column, bestFreeSite.row);
+		}
+
+	
 		this.updateLegal(legalizeBlocks);
 		this.cleanData();
 	}
@@ -526,7 +607,7 @@ public class HardblockConnectionLegalizer{
     ///////////////////////////////////// SITE //////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////
 	class Site {
-	    final int column, row, height;
+	    final  int column, row, height;
 	    Block block;
 
 	    public Site(int column, int row, int height) {

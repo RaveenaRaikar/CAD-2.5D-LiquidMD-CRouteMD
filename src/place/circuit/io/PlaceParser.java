@@ -57,7 +57,7 @@ public class PlaceParser {
             int x = coordinate[0], y = coordinate[1];
 
             // Bind the site and block to each other
-            AbstractSite site = this.circuit.getSite(x, y);
+            AbstractSite site = this.circuit.getSite(this.circuit.getCurrentDie(), x, y);
             block.setSite(site);
         }
 
@@ -86,7 +86,7 @@ public class PlaceParser {
                 int x = coordinate[0], y = coordinate[1];
 
                 // Bind the site and block to each other
-                AbstractSite site = this.circuit.getSite(x, y);
+                AbstractSite site = this.circuit.getSite(this.circuit.getCurrentDie(), x, y);
                 block.setSite(site);
             }
         }

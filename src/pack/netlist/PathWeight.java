@@ -20,6 +20,7 @@ public class PathWeight {
 	private ArrayList<P> endPins;
 
 	private int maxArrivalTime;
+	private Integer maxHops = 0;
 	//To include the SLL delay and identify the critical edges
 	private int maxArrivalTimeSLL;
 
@@ -27,6 +28,7 @@ public class PathWeight {
 	private int timingEdges;
 
 	private DelayMap delayMap;
+	private DelayMapInterposer interposerDelay;
 
 	private ArrayList<CombLoop> tempCut;
 
@@ -69,18 +71,16 @@ public class PathWeight {
 	}
 	private void initializeConnectionDelayMap(){
 		this.delayMap = new DelayMap();
+		this.interposerDelay = new DelayMapInterposer();
 		for(N n:this.root.get_nets()){
 			P sourcePin = null;
 			if(n.has_source()){
 				sourcePin = n.get_source_pin();
-				//Output.println("the source pin is " + sourcePin);
 				
 			}else{
 				for(P p:n.get_terminal_pins()){
 					if(p.is_start_pin()){
 						sourcePin = p;
-					//	Output.println("the source pin in terminal is " + sourcePin);
-					
 					}
 				}
 			}
@@ -88,64 +88,16 @@ public class PathWeight {
 				ErrorLog.print("Problem on net " + n.get_name());
 			}
 			for(P sinkPin:n.get_sink_pins()){
-			//	Output.println("The source pin is " +sourcePin+ " and the sink pin is " + sinkPin);
 				int delay = this.arch.get_connection_delay(sourcePin, sinkPin);
-			//	Output.println("The delay added is " + delay);
 				this.delayMap.addDelay(sourcePin, sinkPin, delay);
-				
-				//Only debug 
-//				{
-//				String sourceLight = null;
-//				String sinkLight = null;
-//				if(sourcePin.has_block() && sinkPin.has_block()){
-//					//Output.println("The first condition is true ");
-//					sourceLight = sourcePin.get_light_architecture_name();
-//					sinkLight = sinkPin.get_light_architecture_name();
-//				}else if(sourcePin.has_block() && !sinkPin.has_block()){
-//					sourceLight = sourcePin.get_light_architecture_name();
-//					sinkLight = ".output" + "." + sinkPin.get_port_name();
-//				}else if(!sourcePin.has_block() && sinkPin.has_block()){
-//					sourceLight = ".input" + "." + sourcePin.get_port_name();
-//					sinkLight = sinkPin.get_light_architecture_name();
-//					
-//				}else if(!sourcePin.has_block() && !sinkPin.has_block()){
-//					sourceLight =".input" + "." + sourcePin.get_port_name();
-//					sinkLight = ".output" + "." + sinkPin.get_port_name();
-//					
-//				}
-//				
-//				//print the delay map with all the delays
-//				Output.println("The delay map has source " + sourcePin.get_id() + " and the arch name " + sourceLight + " and sink " + sinkPin.get_id() + "and sink name " + sinkLight +  " and delay of " + this.delayMap.getDelay(sourcePin, sinkPin));
-//				}
+				this.interposerDelay.addDelay(sourcePin, sinkPin, 0);
 			}
 			for(P terminalPin:n.get_terminal_pins()){
 				if(terminalPin.is_end_pin()){
 				
 					int delay = this.arch.get_connection_delay(sourcePin, terminalPin);
 					this.delayMap.addDelay(sourcePin, terminalPin, delay);
-//					{
-//						String sourceLight = null;
-//						String sinkLight = null;
-//						if(sourcePin.has_block() && terminalPin.has_block()){
-//							//Output.println("The first condition is true ");
-//							sourceLight = sourcePin.get_light_architecture_name();
-//							sinkLight = terminalPin.get_light_architecture_name();
-//						}else if(sourcePin.has_block() && !terminalPin.has_block()){
-//							sourceLight = sourcePin.get_light_architecture_name();
-//							sinkLight = ".output" + "." + terminalPin.get_port_name();
-//						}else if(!sourcePin.has_block() && terminalPin.has_block()){
-//							sourceLight = ".input" + "." + sourcePin.get_port_name();
-//							sinkLight = terminalPin.get_light_architecture_name();
-//							
-//						}else if(!sourcePin.has_block() && !terminalPin.has_block()){
-//							sourceLight =".input" + "." + sourcePin.get_port_name();
-//							sinkLight = ".output" + "." + terminalPin.get_port_name();
-//							
-//						}
-//						
-//						//print the delay map with all the delays
-//						Output.println("The delay map has source " + sourcePin.get_id() + " and the arch name " + sourceLight + " and sink " + terminalPin.get_id() + " and terminalPin name " + sinkLight +  " and delay of " + this.delayMap.getDelay(sourcePin, terminalPin));
-//						}
+					this.interposerDelay.addDelay(sourcePin, terminalPin, 0);
 				}
 			}
 		}
@@ -229,6 +181,7 @@ public class PathWeight {
 			combLoop.reconnect(this.arch, this.delayMap);
 		}
 	}
+	
 	public int analyze_pin(P startPin, int comb, HashSet<P> visited, HashSet<P> analyzed){
 		visited.add(startPin);
 		for(P sinkPin:new HashSet<P>(startPin.get_net().get_sink_pins())){
@@ -274,7 +227,6 @@ public class PathWeight {
 			//SOURCE PIN
 			}else if(p.is_source_pin()){
 				for(P sinkPin:new HashSet<P>(p.get_net().get_sink_pins())){
-				//for(P sinkPin:p.get_net().get_sink_pins()){
 					comb = this.analyze_pin_for_comb_loop(sinkPin, combPins, visited, analyzed, comb);
 				}
 			//SINK PIN
@@ -290,8 +242,6 @@ public class PathWeight {
 							}
 						}
 					}
-				}else{
-					//END OF PATH
 				}
 			}else{
 				Output.println("A pin should be a source pin or a sink pin");
@@ -300,13 +250,8 @@ public class PathWeight {
 		return comb;
 	}
 
-	//DEPTH AND REQ
-	
-	//Identify all the input pins of the sequential blocks and get the arrival time. Only input pins are considered
-	//as this is the termination of the signal.
 	private void assign_arrival_time(){
 		for(P endPin:this.endPins){
-			//Output.println("The end pins are " + endPin.get_id());
 			endPin.recursive_arrival_time(this.arch, this.delayMap);
 		}
 		for(B b:this.root.get_blocks()){
@@ -324,23 +269,17 @@ public class PathWeight {
 		this.maxArrivalTimeSLL =0;
 		for(P endPin:this.endPins){
 			if(endPin.get_arrival_time() > this.maxArrivalTime){
-				this.maxArrivalTime = endPin.get_arrival_time();
-				
-				this.maxArrivalTimeSLL = this.maxArrivalTime + 360;
-				
-				Output.println("The max arrival time with SLL delay is " + this.maxArrivalTimeSLL);
-				Output.println("The max arrival time is " + this.maxArrivalTime);
+				this.maxArrivalTime = endPin.get_arrival_time() ;
 			}
 		}
+		this.maxHops = this.maxArrivalTime/76;
+		System.out.print("\nThe max arrival time is " + this.maxArrivalTime);
 	}
 	private void assign_required_time(){
-		//Output.println("The max time is " + this.maxArrivalTime);
 		for(P endPin:this.endPins){
-			//Output.println("The end pin is " + endPin.get_light_architecture_name());
 			endPin.set_required_time(this.maxArrivalTime);
 		}
 		for(P startPin:this.startPins){
-			//Output.println("The startPin pin is " + startPin.get_light_architecture_name());
 			startPin.recursive_required_time(this.arch, this.delayMap);
 		}
 		for(B b:this.root.get_blocks()){
@@ -477,57 +416,6 @@ public class PathWeight {
 		//Limit amount of critical edges
 		int maximumNumberOfCriticalEdges = (int)Math.round(edges.size()*maxPercentageCriticalEdges*0.01);
 		Output.println("\tThe netlist has " + criticalEdges.size() + " critical edges, max is equal to " + maximumNumberOfCriticalEdges);
-		//For SLL added critical edges
-		
-		ArrayList<P> edges_SLL = new ArrayList<P>(this.find_all_edges_and_assign_criticality_to_each_edge(true));
-		
-		Collections.sort(edges_SLL, P.PinCriticalityComparator);
-		
-		Timing t3 = new Timing();
-		t3.start();
-		double criticality3 = Double.MAX_VALUE;
-		for(P p:edges_SLL){
-			double localCriticality = p.criticality();
-			if(localCriticality <= criticality3){
-				criticality3 = localCriticality;
-			}else{
-				ErrorLog.print("Problem in sort");
-			}
-		}
-		t3.stop();
-
-		// Find critical edges with SLL delay
-		ArrayList<P> criticalEdges_SLL = new ArrayList<P>();
-		for(P edgeS:edges_SLL){
-			if(edgeS.criticality() >= minCriticality){
-				criticalEdges_SLL.add(edgeS);
-			}
-		}
-		//Test criticalEdge sort
-		Timing t4 = new Timing();
-		t4.start();
-		double criticality4 = Double.MAX_VALUE;
-		for(P p:criticalEdges_SLL){
-			double localCriticality = p.criticality();
-			if(localCriticality <= criticality4){
-				criticality4 = localCriticality;
-			}else{
-				ErrorLog.print("Problem in sort");
-			}
-		}
-		t4.stop();
-
-		Output.println("\tTest sort took " + (t1.time() + t2.time()) + " s");
-		Output.newLine();
-
-		//Limit amount of critical edges
-		int maximumNumberOfCriticalEdges_SLL = (int)Math.round(edges_SLL.size()*maxPercentageCriticalEdges*0.01);
-		
-		
-		
-		
-		
-		Output.println("\tThe netlist has " + criticalEdges_SLL.size() + " critical edges with SLL delay, max is equal to " + maximumNumberOfCriticalEdges_SLL);
 		if(criticalEdges.size() > maximumNumberOfCriticalEdges){
 			criticalEdges = new ArrayList<P>(criticalEdges.subList(0, maximumNumberOfCriticalEdges));
 			Output.println("\t\t=> The number of critical edges is limited to " + criticalEdges.size());
@@ -540,6 +428,9 @@ public class PathWeight {
 	/////////////////////////////////////////////////////////////////////////////////////////////////
 	/////////////////////////////////////////////////////////////////////////////////////////////////
 	/////////////////////////////////////////////////////////////////////////////////////////////////
+	
+
+	
 	public HashSet<P> find_all_edges_and_assign_criticality_to_each_edge(boolean SLL){
 		//boolean IsSLL = SLL;
 		Output.println("The condition for SLL is " + SLL);
@@ -568,16 +459,9 @@ public class PathWeight {
 			}
 			//Add all edges
 			for(P sinkPin:net.get_sink_pins()){
-				
-				
-				if(!SLL) { 
-					slack = this.arch.slack(sourcePin, sinkPin);
-					criticality = 1.0 - (slack.doubleValue()/this.maxArrivalTime);}
-				else { 
-					slackSLL = this.arch.slackSLL(sourcePin, sinkPin);
-					criticality = 1.0 - (slackSLL.doubleValue()/this.maxArrivalTime);}
-				
-				//Output.println("The SLL is " + SLL + " the criticality is " + criticality);
+				slack = this.arch.slack(sourcePin, sinkPin);
+				Integer conHop = this.arch.connDelayHopOld(sourcePin, sinkPin);
+				criticality = (conHop - 1)/this.maxHops + (6/this.maxHops);
 				sinkPin.set_criticality(criticality);
 				edges.add(sinkPin);
 				this.numEdges += 1;
@@ -585,13 +469,9 @@ public class PathWeight {
 			for(P terminalPin:net.get_terminal_pins()){
 				if(terminalPin.is_sink_pin()){
 					P sinkPin = terminalPin;
-
-					if(!SLL) {
-						slack = this.arch.slack(sourcePin, sinkPin);
-						criticality = 1.0 - (slack.doubleValue()/this.maxArrivalTime);}
-					else { 
-						slackSLL = this.arch.slackSLL(sourcePin, sinkPin);
-						criticality = 1.0 - (slackSLL.doubleValue()/this.maxArrivalTime);}
+					slack = this.arch.slack(sourcePin, sinkPin);
+					Integer conHop = this.arch.connDelayHopOld(sourcePin, sinkPin);
+					criticality = (conHop - 1)/this.maxHops + (6/this.maxHops);
 					sinkPin.set_criticality(criticality);
 					edges.add(sinkPin);
 					this.numEdges += 1;

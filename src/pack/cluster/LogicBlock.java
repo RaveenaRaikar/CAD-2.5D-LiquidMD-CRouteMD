@@ -159,6 +159,19 @@ public class LogicBlock {
 						ErrorLog.print("Inpad already removed");
 					}
 				}
+			}else if(!child.hasMode()){
+				if(!inpadRemoved){
+					inpadRemoved = true;
+					child.name = null;
+					child.mode = null;
+					child.inputs = new HashMap<String, String[]>();
+					child.outputs = new HashMap<String, String[]>();
+					child.clocks = new HashMap<String, String[]>();
+					child.childBlocks = new ArrayList<LogicBlock>();
+				
+				}else{
+					ErrorLog.print("Inpad already removed");
+				}
 			}
 		}
 		if(!inpadRemoved){
@@ -262,13 +275,6 @@ public class LogicBlock {
 		}
 
 		if(this.isEmpty()){
-			/* VTR8 is accepting open blocks with input and output connections hence remove 
-			 * the empty checks
-			 */
-			//if(!this.inputs.isEmpty()) {ErrorLog.print("Open block should not have inputs");}
-			//if(!this.outputs.isEmpty())ErrorLog.print("Open block should not have outputs");
-			//if(!this.clocks.isEmpty())ErrorLog.print("Open block should not have clocks");
-			//if(!this.childBlocks.isEmpty())ErrorLog.print("Open block should not child blocks");
 			sb.append("/>");
 			sb.append("\n");
 		}else{

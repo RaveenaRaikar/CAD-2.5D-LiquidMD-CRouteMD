@@ -1,6 +1,7 @@
 package place.placers.simulatedannealing;
 
 import place.circuit.Circuit;
+import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
 import place.interfaces.Options;
 import place.visual.PlacementVisualizer;
@@ -19,10 +20,10 @@ public class SimulatedAnnealingPlacerWLD extends SimulatedAnnealingPlacer {
     private EfficientBoundingBoxNetCC calculator;
     private double cachedCost;
 
-    public SimulatedAnnealingPlacerWLD(Circuit circuit, Options options, Random random, Logger logger, PlacementVisualizer visualizer) {
-        super(circuit, options, random, logger, visualizer);
+    public SimulatedAnnealingPlacerWLD(Circuit[] circuitDie, Options options, Random random, Logger logger, PlacementVisualizer[] visualizer, int totalDies, int SLLrows) {
+        super(circuitDie, options, random, logger, visualizer, totalDies,SLLrows);
 
-        this.calculator = new EfficientBoundingBoxNetCC(circuit);
+        this.calculator = new EfficientBoundingBoxNetCC(circuitDie[0]);
     }
 
     @Override

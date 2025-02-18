@@ -7,6 +7,7 @@ import place.circuit.block.GlobalBlock;
 import place.circuit.block.Site;
 import place.circuit.exceptions.PlacementException;
 import place.circuit.pin.AbstractPin;
+import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
 import place.interfaces.Options;
 import place.placers.Placer;
@@ -87,54 +88,36 @@ abstract class SimulatedAnnealingPlacer extends Placer {
         T_DO_SWAPS = "do swaps";
 
 
-    protected double rlim;
+    protected double[] rlim;
     protected int initialRlim, maxRlim;
-    private double temperature, stopRatio;
+    private double[] temperature, stopRatio;
 
     private final double temperatureMultiplier;
 
-    private final boolean fixPins;
-    protected boolean greedy, detailed;
-    protected final int movesPerTemperature;
+    private final boolean[] fixPins = null;
+    protected boolean[] greedy, detailed;
+    protected final int[] movesPerTemperature = null;
 
     protected boolean circuitChanged = true;
-    private double[] deltaCosts;
-    private int numNets;
+    private double[][] deltaCosts;
+    private int[] numNets;
 
 
-    protected SimulatedAnnealingPlacer(Circuit circuit, Options options, Random random, Logger logger, PlacementVisualizer visualizer) {
-        super(circuit, options, random, logger, visualizer);
+    protected SimulatedAnnealingPlacer(Circuit[] circuitDie, Options options, Random random, Logger logger, PlacementVisualizer[] visualizer, int totalDies, int SLLrows) {
+        super(circuitDie, options, random, logger, visualizer, totalDies, SLLrows);
 
-        this.greedy = this.options.getBoolean(O_GREEDY);
-        this.detailed = this.options.getBoolean(O_DETAILED);
 
-        this.fixPins = this.options.getBoolean(O_FIX_IO_PINS);
+        this.greedy[totalDies] = this.options.getBoolean(O_GREEDY);
+        this.detailed[totalDies] = this.options.getBoolean(O_DETAILED);
 
-        double effortLevel = this.options.getDouble(O_EFFORT_LEVEL);
-        double effortExponent = this.options.getDouble(O_EFFORT_EXPONENT);
-        this.movesPerTemperature = (int) (effortLevel * Math.pow(this.circuit.getNumGlobalBlocks(), effortExponent));
-        this.logger.printf("Swaps per iteration: %d\n\n", this.movesPerTemperature);
+        this.fixPins[totalDies] = this.options.getBoolean(O_FIX_IO_PINS);
+
+
+        
+
 
         this.temperatureMultiplier = this.options.getDouble(O_TEMPERATURE);
-        this.stopRatio = this.options.getDouble(O_STOP_RATIO);
-
-        // Set Rlim options
-        int size = Math.max(this.circuit.getWidth(), this.circuit.getHeight());
-
-        int RlimOption = this.options.getInteger(O_RLIM);
-        if(RlimOption == -1) {
-            RlimOption = size - 1;
-        }
-
-        int maxRlimOption = this.options.getInteger(O_MAX_RLIM);
-        if(maxRlimOption == -1) {
-            maxRlimOption = size - 1;
-        }
-
-        this.initialRlim = RlimOption;
-
-        this.maxRlim = maxRlimOption;
-        this.rlim = Math.min(RlimOption, this.maxRlim);
+        this.stopRatio[totalDies] = this.options.getDouble(O_STOP_RATIO);
     }
 
 
@@ -152,19 +135,54 @@ abstract class SimulatedAnnealingPlacer extends Placer {
     @Override
     public void initializeData() {
 
-        this.startTimer(T_INITIALIZE_DATA);
+        
 
-        // Count the number of nets
-        this.numNets = 0;
-        for(GlobalBlock block : this.circuit.getGlobalBlocks()) {
-            for(AbstractPin pin : block.getOutputPins()) {
-                if(pin.getNumSinks() > 0) {
-                    this.numNets++;
+        int dieCounter = 0;
+        
+        while(dieCounter < this.TotalDies) {
+        	this.startTimer(T_INITIALIZE_DATA, dieCounter);
+            this.logger.printf("Swaps per iteration: %d\n\n", this.movesPerTemperature[dieCounter]);
+            double effortLevel = this.options.getDouble(O_EFFORT_LEVEL);
+            double effortExponent = this.options.getDouble(O_EFFORT_EXPONENT);
+            this.movesPerTemperature[dieCounter] = (int) (effortLevel * Math.pow(this.circuitDie[dieCounter].getNumGlobalBlocks(), effortExponent));
+            int size = Math.max(this.circuitDie[dieCounter].getWidth(), this.circuitDie[dieCounter].getHeight());
+            
+            // Set Rlim options
+            
+
+            int RlimOption = this.options.getInteger(O_RLIM);
+            if(RlimOption == -1) {
+                RlimOption = size - 1;
+            }
+
+            int maxRlimOption = this.options.getInteger(O_MAX_RLIM);
+            if(maxRlimOption == -1) {
+                maxRlimOption = size - 1;
+            }
+
+            this.initialRlim = RlimOption;
+
+            this.maxRlim = maxRlimOption;
+            this.rlim[dieCounter] = Math.min(RlimOption, this.maxRlim);
+            
+            
+            // Count the number of nets
+            this.numNets[dieCounter] = 0;
+            for(GlobalBlock block : this.circuitDie[dieCounter].getGlobalBlocks()) {
+                for(AbstractPin pin : block.getOutputPins()) {
+                    if(pin.getNumSinks() > 0) {
+                        this.numNets[dieCounter]++;
+                    }
                 }
             }
-        }
 
-        this.stopTimer(T_INITIALIZE_DATA);
+        	
+            this.stopTimer(T_INITIALIZE_DATA, dieCounter);
+        	dieCounter++;
+        }
+        
+
+        
     }
 
     @Override
@@ -196,77 +214,84 @@ abstract class SimulatedAnnealingPlacer extends Placer {
     @Override
     protected void doPlacement() throws PlacementException {
 
-        this.startTimer(T_INITIALIZE_DATA);
+
         this.initializePlace();
-        this.stopTimer(T_INITIALIZE_DATA);
+
 
         int iteration = 0;
+        int dieCounter = 0;
+        
+        while(dieCounter < this.TotalDies) {
+        	
+            if(!this.greedy[dieCounter]) {
+                this.calculateInitialTemperature(dieCounter);
 
-        if(!this.greedy) {
-            this.calculateInitialTemperature();
+                // Do placement
+                while(this.temperature[dieCounter] > this.stopRatio[dieCounter] * this.getCost() / this.numNets[dieCounter]) {
+                    int numSwaps = this.doSwapIteration(dieCounter);
+                    double alpha = ((double) numSwaps) / this.movesPerTemperature[dieCounter];
 
-            // Do placement
-            while(this.temperature > this.stopRatio * this.getCost() / this.numNets) {
-                int numSwaps = this.doSwapIteration();
-                double alpha = ((double) numSwaps) / this.movesPerTemperature;
+                    double previousTemperature = this.temperature[dieCounter];
+                    double previousRlim = this.rlim[dieCounter];
+                    this.updateRlim(alpha,dieCounter);
+                    double gamma = this.updateTemperature(alpha, dieCounter);
 
-                double previousTemperature = this.temperature;
-                double previousRlim = this.rlim;
-                this.updateRlim(alpha);
-                double gamma = this.updateTemperature(alpha);
+                    this.printStatistics(iteration, previousTemperature, previousRlim, alpha, gamma);
 
-                this.printStatistics(iteration, previousTemperature, previousRlim, alpha, gamma);
+                    iteration++;
+                }
 
-                iteration++;
+                this.rlim[dieCounter] = 3;
             }
 
-            this.rlim = 3;
+            // Finish with a greedy iteration
+            this.greedy[dieCounter] = true;
+            int numSwaps = this.doSwapIteration(dieCounter);
+            double alpha = ((double) numSwaps) / this.movesPerTemperature[dieCounter];
+            this.printStatistics(iteration, this.temperature[dieCounter], this.rlim[dieCounter], alpha, 0.0);
+
+
+            this.logger.println();
+            
+            dieCounter++;
         }
 
-        // Finish with a greedy iteration
-        this.greedy = true;
-        int numSwaps = this.doSwapIteration();
-        double alpha = ((double) numSwaps) / this.movesPerTemperature;
-        this.printStatistics(iteration, this.temperature, this.rlim, alpha, 0.0);
-
-
-        this.logger.println();
     }
 
 
-    private void calculateInitialTemperature() throws PlacementException {
-        if(this.detailed) {
-            this.temperature = this.calculateInitialTemperatureDetailed();
+    private void calculateInitialTemperature(int dieNumber) throws PlacementException {
+        if(this.detailed[dieNumber]) {
+            this.temperature[dieNumber] = this.calculateInitialTemperatureDetailed(dieNumber);
         } else {
-            this.temperature = this.calculateInitialTemperatureGlobal();
+            this.temperature[dieNumber] = this.calculateInitialTemperatureGlobal(dieNumber);
         }
     }
 
-    private double calculateInitialTemperatureGlobal() throws PlacementException {
-        int numSamples = this.circuit.getNumGlobalBlocks();
-        double stdDev = this.doSwapIteration(numSamples, false);
+    private double calculateInitialTemperatureGlobal(int dieNumber) throws PlacementException {
+        int numSamples = this.circuitDie[dieNumber].getNumGlobalBlocks();
+        double stdDev = this.doSwapIteration(numSamples, false, dieNumber);
 
         return this.temperatureMultiplier * stdDev;
     }
 
-    private double calculateInitialTemperatureDetailed() throws PlacementException {
+    private double calculateInitialTemperatureDetailed(int dieNumber) throws PlacementException {
         // Use the method described in "Temperature Measurement and
         // Equilibrium Dynamics of Simulated Annealing Placements"
 
-        int numSamples = Math.max(this.circuit.getNumGlobalBlocks() / 5, 500);
-        this.doSwapIteration(numSamples, false);
+        int numSamples = Math.max(this.circuitDie[dieNumber].getNumGlobalBlocks() / 5, 500);
+        this.doSwapIteration(numSamples, false, dieNumber);
 
-        this.startTimer(T_DO_SWAPS);
+        this.startTimer(T_DO_SWAPS, dieNumber);
 
-        Arrays.sort(this.deltaCosts);
+        Arrays.sort(this.deltaCosts[dieNumber]);
 
-        int zeroIndex = Arrays.binarySearch(this.deltaCosts, 0);
+        int zeroIndex = Arrays.binarySearch(this.deltaCosts[dieNumber], 0);
         if(zeroIndex < 0) {
             zeroIndex = -zeroIndex - 1;
         }
 
-        double Emin = integral(this.deltaCosts, 0, zeroIndex, 0);
-        double maxEplus = integral(this.deltaCosts, zeroIndex, numSamples, 0);
+        double Emin = integral(this.deltaCosts[dieNumber], 0, zeroIndex, 0);
+        double maxEplus = integral(this.deltaCosts[dieNumber], zeroIndex, numSamples, 0);
 
         if(maxEplus < Emin) {
             this.logger.raise("SA failed to get a temperature estimate");
@@ -276,10 +301,10 @@ abstract class SimulatedAnnealingPlacer extends Placer {
         double maxT = Double.MAX_VALUE;
 
         // very coarse estimate
-        double temperature = this.deltaCosts[this.deltaCosts.length - 1] / 1000;
+        double temperature = this.deltaCosts[dieNumber][this.deltaCosts.length - 1] / 1000;
 
         while(minT == 0 || maxT / minT > 1.1) {
-            double Eplus = integral(this.deltaCosts, zeroIndex, numSamples, temperature);
+            double Eplus = integral(this.deltaCosts[dieNumber], zeroIndex, numSamples, temperature);
 
             if(Emin < Eplus) {
                 if(temperature < maxT) {
@@ -305,7 +330,7 @@ abstract class SimulatedAnnealingPlacer extends Placer {
             }
         }
 
-        this.stopTimer(T_DO_SWAPS);
+        this.stopTimer(T_DO_SWAPS, dieNumber);
 
         return temperature * this.temperatureMultiplier;
     }
@@ -325,33 +350,33 @@ abstract class SimulatedAnnealingPlacer extends Placer {
 
 
 
-    private int doSwapIteration() throws PlacementException {
-        return (int) this.doSwapIteration(this.movesPerTemperature, true);
+    private int doSwapIteration(int dieNumber) throws PlacementException {
+        return (int) this.doSwapIteration(this.movesPerTemperature[dieNumber], true, dieNumber);
     }
 
-    private double doSwapIteration(int moves, boolean pushThrough) throws PlacementException {
+    private double doSwapIteration(int moves, boolean pushThrough, int dieNumber) throws PlacementException {
 
         this.initializeSwapIteration();
 
         String timer = pushThrough ? T_DO_SWAPS : T_CALCULATE_TEMPERATURE;
-        this.startTimer(timer);
+        this.startTimer(timer, dieNumber);
 
         int numSwaps = 0;
 
         double sumDeltaCost = 0;
         double quadSumDeltaCost = 0;
         if(!pushThrough) {
-            this.deltaCosts = new double[moves];
+            this.deltaCosts[dieNumber] = new double[moves];
         }
 
-        int intRlim = (int) Math.round(this.rlim);
+        int intRlim = (int) Math.round(this.rlim[dieNumber]);
 
         for (int i = 0; i < moves; i++) {
-            Swap swap = this.findSwap(intRlim);
+            Swap swap = this.findSwap(intRlim, dieNumber);
             double deltaCost = this.getDeltaCost(swap);
 
             if(pushThrough) {
-                if(deltaCost <= 0 || (this.greedy == false && this.random.nextDouble() < Math.exp(-deltaCost / this.temperature))) {
+                if(deltaCost <= 0 || (this.greedy[dieNumber] == false && this.random.nextDouble() < Math.exp(-deltaCost / this.temperature[dieNumber]))) {
 
                     swap.apply();
                     numSwaps++;
@@ -365,7 +390,7 @@ abstract class SimulatedAnnealingPlacer extends Placer {
 
             } else {
                 this.revert(i);
-                this.deltaCosts[i] = deltaCost;
+                this.deltaCosts[dieNumber][i] = deltaCost;
                 sumDeltaCost += deltaCost;
                 quadSumDeltaCost += deltaCost * deltaCost;
             }
@@ -379,25 +404,25 @@ abstract class SimulatedAnnealingPlacer extends Placer {
             double sumQuads = quadSumDeltaCost;
             double quadSum = sumDeltaCost * sumDeltaCost;
 
-            double numBlocks = this.circuit.getNumGlobalBlocks();
+            double numBlocks = this.circuitDie[dieNumber].getNumGlobalBlocks();
             double quadNumBlocks = numBlocks * numBlocks;
 
             result = Math.sqrt(Math.abs(sumQuads / numBlocks - quadSum / quadNumBlocks));
         }
 
-        this.stopTimer(timer);
+        this.stopTimer(timer, dieNumber);
         return result;
     }
 
 
 
-    protected Swap findSwap(int Rlim) {
+    protected Swap findSwap(int Rlim, int dieNumber) {
         while(true) {
             // Find a suitable from block
             GlobalBlock fromBlock = null;
             do {
-                fromBlock = this.circuit.getRandomBlock(this.random);
-            } while(this.isFixed(fromBlock));
+                fromBlock = this.circuitDie[dieNumber].getRandomBlock(this.random);
+            } while(this.isFixed(fromBlock, dieNumber));
 
             BlockType blockType = fromBlock.getType();
 
@@ -410,12 +435,12 @@ abstract class SimulatedAnnealingPlacer extends Placer {
             int column = fromBlock.getColumn();
             int row = fromBlock.getRow();
             int minRow = Math.max(1, row - Rlim);
-            int maxRow = Math.min(this.circuit.getHeight() - freeAbove, row + Rlim);
+            int maxRow = Math.min(this.circuitDie[dieNumber].getHeight() - freeAbove, row + Rlim);
 
             // Find a suitable site near this block
             int maxTries = Math.min(4 * Rlim * Rlim / fromBlock.getType().getHeight(), 10);
             for(int tries = 0; tries < maxTries; tries++) {
-                Site toSite = (Site) this.circuit.getRandomSite(blockType, column, Rlim, minRow, maxRow, this.random);
+                Site toSite = (Site) this.circuitDie[dieNumber].getRandomSite(blockType, column, Rlim, minRow, maxRow, this.random);
 
                 // If toSite is null, no swap is possible with this fromBlock
                 // Go find another fromBlock
@@ -432,7 +457,7 @@ abstract class SimulatedAnnealingPlacer extends Placer {
                     int toMinRow = toSite.getRow();
                     int toMaxRow = toMinRow + freeAbove;
                     for(int toRow = toMinRow; toRow <= toMaxRow; toRow++) {
-                        GlobalBlock toBlock = ((Site) this.circuit.getSite(toColumn, toRow)).getBlock();
+                        GlobalBlock toBlock = ((Site) this.circuitDie[dieNumber].getSite(this.circuitDie[dieNumber].getCurrentDie(), toColumn, toRow)).getBlock();
                         if(toBlock != null && toBlock.isInMacro()) {
                             toBlocksInMacro = true;
                             break;
@@ -440,7 +465,7 @@ abstract class SimulatedAnnealingPlacer extends Placer {
                     }
 
                     if(!toBlocksInMacro) {
-                        Swap swap = new Swap(this.circuit, fromBlock, toSite);
+                        Swap swap = new Swap(this.circuitDie[dieNumber], fromBlock, toSite);
                         return swap;
                     }
                 }
@@ -448,27 +473,27 @@ abstract class SimulatedAnnealingPlacer extends Placer {
         }
     }
 
-    private boolean isFixed(GlobalBlock block) {
+    private boolean isFixed(GlobalBlock block, int dieCounter) {
         // Only IO blocks are fixed, if fixPins option is true
-        return this.fixPins && block.getCategory() == BlockCategory.IO;
+        return this.fixPins[dieCounter] && block.getCategory() == BlockCategory.IO;
     }
 
 
 
-    protected final double updateTemperature(double alpha) {
+    protected final double updateTemperature(double alpha, int dieNumber) {
         double gamma;
 
         if (alpha > 0.96) {
             gamma = 0.5;
         } else if (alpha > 0.8) {
             gamma = 0.9;
-        } else if (alpha > 0.15  || this.rlim > 1) {
+        } else if (alpha > 0.15  || this.rlim[dieNumber] > 1) {
             gamma = 0.95;
         } else {
             gamma = 0.8;
         }
 
-        this.temperature *= gamma;
+        this.temperature[dieNumber] *= gamma;
 
         return gamma;
     }
@@ -478,9 +503,9 @@ abstract class SimulatedAnnealingPlacer extends Placer {
         this.maxRlim = maxRlim;
     }
 
-    protected final void updateRlim(double alpha) {
-        this.rlim *= (1 - 0.44 + alpha);
+    protected final void updateRlim(double alpha, int dieNumber) {
+        this.rlim[dieNumber] *= (1 - 0.44 + alpha);
 
-        this.rlim = Math.max(Math.min(this.rlim, this.maxRlim), 1);
+        this.rlim[dieNumber] = Math.max(Math.min(this.rlim[dieNumber], this.maxRlim), 1);
     }
 }

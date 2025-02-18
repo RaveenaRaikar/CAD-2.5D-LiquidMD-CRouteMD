@@ -239,9 +239,10 @@ public class HardblockAnneal {
 		Site site1 = block1.getSite();
 		
 		Site site2 = this.sites[this.random.nextInt(this.numSites)];
-		while(site1.equals(site2) ){
+		while(site1.equals(site2) && (site2 != null) ){
 			site2 = this.sites[this.random.nextInt(this.numSites)];
 		}
+		
 		Block block2 = site2.getBlock();
 		
 		Swap swap = new Swap(block1, site1, block2, site2);

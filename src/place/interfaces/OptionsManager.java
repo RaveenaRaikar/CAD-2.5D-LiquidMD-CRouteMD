@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Random;
 
 import place.circuit.Circuit;
+import place.circuit.timing.TimingGraphSLL;
 import place.main.Main;
 import place.placers.Placer;
 import place.visual.PlacementVisualizer;
@@ -44,14 +45,18 @@ public abstract class OptionsManager {
     public int getNumPlacers() {
         return this.placerNames.size();
     }
-    public Placer getPlacer(int placerIndex, Circuit circuit, Random random, PlacementVisualizer visualizer) {
+    public Placer getPlacer(int placerIndex, Circuit[] circuit, Random random, PlacementVisualizer[] visualizer, int Totaldies, int SLLrows) {
         String placerName = this.placerNames.get(placerIndex);
         Options options = this.placerOptions.get(placerIndex);
 
-        return this.placerFactory.newPlacer(placerName, circuit, options, random, visualizer);
+        return this.placerFactory.newPlacer(placerName, circuit, options, random, visualizer, Totaldies, SLLrows);
     }
+    public Placer getPlacer(int placerIndex, Circuit[] circuit, Random random, PlacementVisualizer[] visualizer, int Totaldies, int SLLrows, TimingGraphSLL timingGraphSLL) {
+        String placerName = this.placerNames.get(placerIndex);
+        Options options = this.placerOptions.get(placerIndex);
 
-
+        return this.placerFactory.newPlacer(placerName, circuit, options, random, visualizer, Totaldies, SLLrows, timingGraphSLL);
+    }
     protected Options getDefaultOptions(String placerName) {
         return this.placerFactory.initOptions(placerName);
     }

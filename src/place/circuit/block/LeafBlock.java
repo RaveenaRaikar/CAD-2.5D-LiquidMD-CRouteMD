@@ -11,12 +11,11 @@ public class LeafBlock extends LocalBlock {
 
     public LeafBlock(String name, BlockType type, int index, AbstractBlock parent, GlobalBlock globalParent) {
         super(name, type, index, parent);
-
         this.globalParent = globalParent;
     }
 
     @Override
-    protected LeafPin createPin(PortType portType, int index) {
+	public LeafPin createPin(PortType portType, int index) {
         return new LeafPin(this, portType, index);
     }
 

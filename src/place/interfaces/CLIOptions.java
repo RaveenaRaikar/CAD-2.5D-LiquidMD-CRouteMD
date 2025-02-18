@@ -1,11 +1,13 @@
 package place.interfaces;
 
+import place.interfaces.Logger.Stream;
+import place.util.Pair;
+
+import java.awt.*;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-
-import place.interfaces.Logger.Stream;
-import place.util.Pair;
 
 
 class CLIOptions extends OptionsManager {
@@ -21,10 +23,9 @@ class CLIOptions extends OptionsManager {
 
         // First create a logger
         this.args = this.createLogger(Arrays.asList(argArray));
-
         // Check if a help argument is provided
         int helpArgIndex = Math.max(this.args.indexOf("-h"), this.args.indexOf("--help"));
-        if(helpArgIndex > 0) {
+        if(helpArgIndex >= 0) {
             this.printHelp(Stream.OUT);
             System.exit(0);
         }
@@ -54,7 +55,6 @@ class CLIOptions extends OptionsManager {
     }
 
     private List<String> createLogger(List<String> argsWithLogger) {
-        //TODO: provide an option to log to a file
         return argsWithLogger;
     }
 
@@ -99,12 +99,12 @@ class CLIOptions extends OptionsManager {
         for(String optionName : options.keySet()) {
             if(options.isRequired(optionName)) {
                 String optionValue = this.args.get(argIndex);
-                if(optionValue.substring(0, 2).equals("--")) {
-                    this.printErrorFormat("Exptected required argument \"%s\" at position %d, got \"%s", optionName, argIndex, optionValue);
-                }
+	                if(optionValue.substring(0, 2).equals("--")) {
+	                    this.printErrorFormat("Exptected required argument \"%s\" at position %d, got \"%s", optionName, argIndex, optionValue);
+	                }
+	                options.set(optionName, optionValue);
+	                argIndex++;
 
-                options.set(optionName, optionValue);
-                argIndex++;
             }
         }
 
@@ -130,12 +130,68 @@ class CLIOptions extends OptionsManager {
 
             // The argument is differently valued, let the OptionList parse it
             } else {
+
+                
+//                
+                String optionType = options.getType(optionName);
+
+                Object optionValue;
+
+                // If arraylist, fetch next argvalues
+                if (optionType.equals(ArrayList.class.getName())){
+
+
+                    ArrayList<String> files = new ArrayList<String>();
+                    files.add(argValue);
+
+                    while(argValue != null){
+                        argValue = this.getArgValue(argIndex + 1);
+                        if (argValue != null){
+                            files.add(argValue);
+                            argIndex++;
+                        }
+                    }
+                    optionValue = files;
+
+                } else if(optionType.equals(Integer.class.getName())){
+                	optionValue = Integer.valueOf(argValue);
+                }else if(optionType.equals(File.class.getName())){
+                	optionValue = new File(argValue);
+                }else if(optionType.equals(Long.class.getName())){
+                	optionValue = Long.valueOf(argValue);
+                }else if(optionType.equals(Boolean.class.getName())){
+                	optionValue = Boolean.valueOf(argValue);
+                }else if(optionType.equals(Float.class.getName())) {
+                	optionValue = Float.valueOf(argValue);
+                }else{
+                    optionValue = argValue;
+                }
+
+
                 try {
-                    options.set(optionName, argValue);
+                    if (optionType.equals(ArrayList.class.getName())){
+                        options.set(optionName, (ArrayList<String>) optionValue);
+                    } else if (optionType.equals(String.class.getName())) {
+                        options.set(optionName, (String) optionValue);
+                    } else if (optionType.equals(Integer.class.getName())) {
+                    	
+
+                    	options.set(optionName, optionValue);
+                    } else if (optionType.equals(Long.class.getName())) {
+                    	options.set(optionName, optionValue);
+                    }else if (optionType.equals(Boolean.class.getName())) {
+
+
+                    	options.set(optionName, optionValue);
+                    }else if(optionType.equals(Float.class.getName())){
+                    	options.set(optionName, optionValue);
+                    }else {
+                        options.set(optionName, optionValue);
+                    }
 
                 } catch(NumberFormatException error) {
-                    String type = options.getType(optionName);
-                    this.printErrorFormat("The argument \"%s\" requires a value of type %s, got \"%s\"", argName, type, argValue);
+                    String type_ = options.getType(optionName);
+                    this.printErrorFormat("The argument \"%s\" requires a value of type %s, got \"%s\"", argName, type_, argValue);
 
                 } catch(IllegalArgumentException error) {
                     this.printErrorFormat("Invalid argument: \"%s\"", argName);

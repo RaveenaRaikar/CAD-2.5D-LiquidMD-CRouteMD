@@ -42,6 +42,7 @@ public class BlockType implements Serializable, Comparable<BlockType> {
 
 
     private Integer typeIndex, modeIndex;
+  //  private boolean isWire;
 
     public BlockType(BlockType parentBlockType, String typeName) {
         this.typeIndex = BlockTypeData.getInstance().getTypeIndex(parentBlockType, typeName);
@@ -55,13 +56,18 @@ public class BlockType implements Serializable, Comparable<BlockType> {
     BlockType(int typeIndex) {
         this.typeIndex = typeIndex;
         this.modeIndex = null;
+        
     }
     BlockType(int typeIndex, String modeName) {
         this.typeIndex = typeIndex;
         this.modeIndex = BlockTypeData.getInstance().getModeIndex(this.typeIndex, modeName);
     }
 
-
+    BlockType(int typeIndex, String modeName, boolean wireType) {
+        this.typeIndex = typeIndex;
+        this.modeIndex = BlockTypeData.getInstance().getModeIndex(this.typeIndex, modeName);
+    //    isWire = true;
+    }
 
     int getTypeIndex() {
         return this.typeIndex;

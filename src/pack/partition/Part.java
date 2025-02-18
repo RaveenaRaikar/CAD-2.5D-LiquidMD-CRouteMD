@@ -8,14 +8,18 @@ import pack.netlist.B;
 import pack.netlist.N;
 import pack.netlist.P;
 import pack.util.ErrorLog;
+import pack.util.Output;
 
 public class Part {
 	private HashSet<B> blocks;
 	private HashSet<B> primitivesDSP;
 	private HashMap<HardBlockGroup,HashSet<B>> primitivesRAM;
+	private HashSet<B> primitivesDieRAM; //Since pre-packing is not done before die level partitioning, Need to use a different
+	//hashset to keep a track of RAM primitives
 	
 	private int numDSPPrimitives;
 	private int numRAMPrimitives;
+	private int numdieRAMPrimitives;
 
 	private int part;
 
@@ -24,10 +28,12 @@ public class Part {
 	public Part(){
 		this.blocks = new HashSet<B>();
 		this.primitivesDSP = new HashSet<B>();
+		this.primitivesDieRAM = new HashSet<B>();
 		this.primitivesRAM = new HashMap<HardBlockGroup,HashSet<B>>();
 		
 		this.numDSPPrimitives = 0;
 		this.numRAMPrimitives = 0;
+		this.numdieRAMPrimitives = 0;
 		
 		this.part = -1;
 		
@@ -46,9 +52,8 @@ public class Part {
 	public void add(B b){
 		b.set_part(this.part);
 		this.blocks.add(b);
-		
-		//if(b.get_type().equals("HALF_DSP")){
-		if(b.get_type().equals("dsp")){
+		//
+		if(b.get_type().equals("multiply")){
 			this.numDSPPrimitives += 1;
 			this.primitivesDSP.add(b);
 		}else if(b.hasHardBlockGroup()){
@@ -58,6 +63,9 @@ public class Part {
 			}
 			this.primitivesRAM.get(hbg).add(b);
 			this.numRAMPrimitives += 1;
+		}else if(b.get_type().contains("port_ram")) {
+			this.numdieRAMPrimitives += 1;
+			this.primitivesDieRAM.add(b);
 		}
 	}
 	public void remove(B b){
@@ -65,17 +73,19 @@ public class Part {
 		if(this.blocks.remove(b) == false){
 			ErrorLog.print("Block " + b.toString() + " not removed correctly");
 		}
-		if(b.get_type().equals("dsp")){
-	//	if(b.get_type().equals("HALF_DSP")){
+		if(b.get_type().equals("multiply")){
 			this.numDSPPrimitives -= 1;
 			this.primitivesDSP.remove(b);
-		}else if(b.get_type().contains("port_ram")){
+		}else if(b.hasHardBlockGroup()){ 
 			HardBlockGroup hbg = b.getHardBlockGroup();
 			this.primitivesRAM.get(hbg).remove(b);
 			if(this.primitivesRAM.get(hbg).isEmpty()){
 				this.primitivesRAM.remove(hbg);
 			}
 			this.numRAMPrimitives -= 1;
+		}else if(b.get_type().contains("port_ram")) {
+			this.numdieRAMPrimitives -= 1;
+			this.primitivesDieRAM.remove(b);
 		}
 		for(ArrayList<B> molecule:this.ramMolecules){
 			if(molecule.contains(b)){
@@ -91,6 +101,9 @@ public class Part {
 	public HashSet<B> getDSPPrimitives(){
 		return this.primitivesDSP;
 	}
+	public HashSet<B> getprimitivesDieRAM(){
+		return this.primitivesDieRAM;
+	}
 	public HashSet<B> getRAMPrimitives(HardBlockGroup rg){
 		return this.primitivesRAM.get(rg);
 	}
@@ -99,6 +112,9 @@ public class Part {
 	}
 	public int numRAMPrimitives(){
 		return this.numRAMPrimitives;
+	}
+	public int numDieRAMPrimitives(){
+		return this.numdieRAMPrimitives;
 	}
 	
 

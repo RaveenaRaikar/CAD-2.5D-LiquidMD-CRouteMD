@@ -59,7 +59,6 @@ public class B {
 		this.outputPins = null;
 		this.atoms = null;
 		this.truthTable = null;
-		//Output.println("Cleanup is true");
 	}
 	
 	//GETTERS AND SETTERS
@@ -229,6 +228,7 @@ public class B {
 		}
 		return inputNets;
 	}
+
 	public ArrayList<P> get_output_pins(){
 		ArrayList<P> outputPins = new ArrayList<P>();
 		for(String outputPort:this.outputPins.keySet()){
@@ -384,8 +384,6 @@ public class B {
 	
 	//HASH
 	public String get_hash(){
-		//Required to determine if memory slices have the same control signals
-		//Add pins for the Koios architecture.
 		StringBuffer hash = new StringBuffer();
 		if(this.get_type().contains("port_ram")){
 			ArrayList<String> hashedInputs = new ArrayList<String>();
@@ -397,26 +395,6 @@ public class B {
 			hashedInputs.add("addr");
 			
 			hashedInputs.add("clk");
-			/*
-			hashedInputs.add("portaaddr");
-			hashedInputs.add("portbaddr");
-			hashedInputs.add("ena0");
-			hashedInputs.add("ena1");
-			hashedInputs.add("ena2");
-			hashedInputs.add("ena3");
-			hashedInputs.add("clr0");
-			hashedInputs.add("clr1");
-			hashedInputs.add("portare");
-			hashedInputs.add("portbre");
-			hashedInputs.add("portawe");
-			hashedInputs.add("portbwe");
-			hashedInputs.add("portaaddrstall");
-			hashedInputs.add("portbaddrstall");
-			hashedInputs.add("portabyteenamasks");
-			hashedInputs.add("portbbyteenamasks");
-			
-			hashedInputs.add("clk0");
-			*/
 			hash.append(this.get_type());
 			for(String inputPort:hashedInputs){
 				if(this.has_input_port(inputPort)){
@@ -427,7 +405,6 @@ public class B {
 				}
 			}
 		}else{
-			//Output.println("BlockType is " + this.get_type() + ", should be stratixiv_ram_block");
 			Output.println("BlockType is " + this.get_type() + ", should be Ram block");
 		}
 		return hash.toString();
@@ -456,12 +433,10 @@ public class B {
 		if(this.get_type().equals(".latch")){
 			parts.addAll(this.net_string("D"));
 			parts.addAll(this.net_string("Q"));
-		//	Output.println("The Q is " + toString(this.net_string("Q")));
 			parts.add("re");
 			parts.addAll(this.net_string("clk"));
 			parts.add("0");
 			blif.add_latch(".latch" + toString(parts));
-		//	Output.println("the latch added is " + toString(parts));
 		}else if(this.get_type().equals(".names")){
 			parts.addAll(this.net_string("in"));
 			parts.addAll(this.net_string("out"));
@@ -475,7 +450,6 @@ public class B {
 				if(this.get_type().contains("multiply"))
 				{
 				firstOutputPort = false;
-			//	Output.println("The Output ports are " + outputPort);
 				}
 				parts.addAll(output_port_to_blif(outputPort, model, blif, firstOutputPort, printUnconnectedPins));
 				firstOutputPort = false;
@@ -548,7 +522,6 @@ public class B {
 			}
 		}else{
 			for(int i=0; i<model.pins_on_port(port); i++){
-				//Output.println("The value is " + model.pins_on_port(port));
 				if(nets.size() <= i){
 					if(firstOutputPort){
 						result.add(port + "[" + i + "]" + "=" + this.get_name());
@@ -628,7 +601,12 @@ public class B {
 						ErrorLog.print("Block expexted on this pin");
 						return null;
 					}
-				}else{
+				
+				}else if(outNet.has_terminals()){
+					System.out.print("The outnet " + outNet + " is connected to the output");
+					return null;
+				}else {
+					Output.println("The size of the output pin is " + outNet.get_sink_pins().size());
 					ErrorLog.print("Fanout one expected on out net");
 					return null;
 				}

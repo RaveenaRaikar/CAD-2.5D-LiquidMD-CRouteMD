@@ -25,14 +25,18 @@ import pack.util.Util;
 
 public class TPack {
 	private Netlist root;
+	private Netlist Orig;
 	private Partition partition;
-	//private Architecture architecture;
+
 	private Simulation simulation;
 
 	private String vpr_folder;
+	private int DieNum;
 
 	private Set<String> netlistInputs;
+
 	private Set<String> netlistOutputs;
+	private ArrayList<String> SLLPartedges;
 
 	private List<Netlist> subcircuits;
 	private List<LogicBlock> logicBlocks;
@@ -40,34 +44,56 @@ public class TPack {
 	private ThreadPool threadPool;
 	private List<VPRThread> packPool;
 
-	public TPack(Netlist root, Partition partition, Architecture architecture, Simulation simulation){
+	public TPack(Netlist Orig, Netlist root, Partition partition, Architecture architecture, Simulation simulation, int DieNum,ArrayList<String> SLLPartedges){
 		this.root = root;
+		this.Orig = Orig;
 		this.partition = partition;
-		//this.architecture = architecture;
+
 		this.simulation = simulation;
 
 		this.vpr_folder = simulation.getStringValue("vpr_folder");
 
 		this.logicBlocks = new ArrayList<>();
+		this.DieNum = DieNum;
+		this.SLLPartedges = SLLPartedges;
+		this.findNetlistInputsAndOutputTerminalNames(SLLPartedges);
 
-		this.findNetlistInputsAndOutputTerminalNames();
-		//this.deleteExistingFiles();
 	}
-	private void findNetlistInputsAndOutputTerminalNames(){
+	public TPack(Netlist Orig, Netlist root, Architecture architecture, Simulation simulation, int DieNum,ArrayList<String> SLLPartedges){
+		this.root = root;
+		this.Orig = Orig;
+
+		this.simulation = simulation;
+
+		this.vpr_folder = simulation.getStringValue("vpr_folder");
+
+		this.logicBlocks = new ArrayList<>();
+		this.DieNum = DieNum;
+		this.SLLPartedges = SLLPartedges;
+		this.findNetlistInputsAndOutputTerminalNames(SLLPartedges);
+
+	}
+	private void findNetlistInputsAndOutputTerminalNames(ArrayList<String> SLLPartedges){
 		this.netlistInputs = new HashSet<>();
+
  		for(N inputNet:this.root.get_input_nets()){
  			boolean inputTerminalFound = false;
-			for(P terminalPin:inputNet.get_terminal_pins()){
-				T t = terminalPin.get_terminal();
-				if(t.is_input_type()){
-					this.netlistInputs.add(t.get_name());
-					inputTerminalFound = true;
+ 			if(this.Orig.get_Orig_input_nets().contains(inputNet.get_name())) {
+ 				
+ 				for(P terminalPin:inputNet.get_terminal_pins()){
+					T t = terminalPin.get_terminal();
+					if(t.is_input_type()){
+						this.netlistInputs.add(t.get_name());
+						inputTerminalFound = true;
+					}
 				}
-			}
-			if(!inputTerminalFound){
-				ErrorLog.print("Input net " + inputNet.toString() + " has no input terminal");
-			}
+				if(!inputTerminalFound){
+					ErrorLog.print("Input net " + inputNet.toString() + " has no input terminal");
+				}
+ 			}
+
  		}
+ 		
  		this.netlistOutputs = new HashSet<>();
 		ArrayList<N> outputNets = new ArrayList<>();
  		outputNets.addAll(this.root.get_output_nets());
@@ -84,17 +110,20 @@ public class TPack {
 		}
  		for(N outputNet:outputNets){
  			boolean outputTerminalFound = false;
-			for(P terminalPin:outputNet.get_terminal_pins()){
-				T t = terminalPin.get_terminal();
-				if(t.is_output_type()){
-					this.netlistOutputs.add("out:" + t.get_name());
-					outputTerminalFound = true;
+ 			if(this.Orig.get_Orig_output_nets().contains(outputNet.get_name())) {
+				for(P terminalPin:outputNet.get_terminal_pins()){
+					T t = terminalPin.get_terminal();
+					if(t.is_output_type()){
+						this.netlistOutputs.add("out:" + t.get_name());
+						outputTerminalFound = true;
+					}
 				}
-			}
-			if(!outputTerminalFound){
-				ErrorLog.print("Output net " + outputNet.toString() + " has no output terminal");
-			}
-		}
+				if(!outputTerminalFound){
+					ErrorLog.print("Output net " + outputNet.toString() + " has no output terminal");
+				}
+ 			}
+
+ 		}
 	}
 	public void seedBasedPacking(){
 		Output.println("PHASE 2: SEED BASED PACKING");
@@ -111,9 +140,6 @@ public class TPack {
 
 		//Analyze the hierarchy recursively and give each netlist a hierarchy identifier
 		this.root.setRecursiveHierarchyIdentifier("");
-		//for(Netlist subcircuit:this.subcircuits){
-		//      System.out.println(subcircuit.getHierarchyIdentifier());
-		//}
 
 		double unpackTime = 0.0;
 		for(Netlist subcircuit:this.subcircuits){
@@ -164,6 +190,24 @@ public class TPack {
 			netlist.updateEnabledLogicBlocks();
 		}
 	}
+	public void seedBasedPackingVPR(){
+		Output.println("PHASE 2: SEED BASED PACKING");
+		Output.newLine();
+		this.packPool = new ArrayList<>();
+
+		this.startAAPack();
+		this.finishAAPack();
+
+	
+		Output.newLine();
+
+
+		this.removeCutTerminalsFromIOBlocks();
+		this.updateEnabledLogicBlocks();
+		for(Netlist netlist: this.root.get_leaf_nodes()){
+			netlist.updateEnabledLogicBlocks();
+		}
+	}
 	private void updateEnabledLogicBlocks(){
 		List<LogicBlock> temp = this.logicBlocks;
 		this.logicBlocks = new ArrayList<>();
@@ -177,12 +221,13 @@ public class TPack {
 	public List<LogicBlock> getLogicBlocks(){
 		return this.logicBlocks;
 	}
+	
 
 	private void startTPack(Set<B> floatingBlocks){
 		boolean dielevel = false;
 		int thread = this.threadPool.getThread();
 		Netlist.write_blif(this.vpr_folder + "vpr/files/", thread, floatingBlocks, this.root.get_blif(), this.root.get_models(), this.simulation.getSimulationID(), dielevel);
-		VPRThread vpr = new VPRThread(thread, this.simulation, null);
+		VPRThread vpr = new VPRThread(thread, this.simulation, null,this.DieNum);
 		vpr.run(floatingBlocks.size());
 		this.packPool.add(vpr);
 	}
@@ -191,30 +236,31 @@ public class TPack {
 		while(!this.subcircuits.isEmpty() && !this.threadPool.isEmpty()){
 			Netlist leafNode = this.subcircuits.remove(0);
 			int thread = this.threadPool.getThread();
-			//Output.println("the thread is " + thread);
 			leafNode.writeSDC(this.vpr_folder + "vpr/files/", thread, this.partition, this.simulation.getSimulationID());
-			//Output.println("The thread is " + thread + " and the partition number is " + this.partition.);
 			leafNode.writeBlif(this.vpr_folder + "vpr/files/", thread, this.partition, this.simulation.getSimulationID(),dielevel);
-			VPRThread vpr = new VPRThread(thread, this.simulation, leafNode);
+			VPRThread vpr = new VPRThread(thread, this.simulation, leafNode,this.DieNum);
 			
 			vpr.run(leafNode.atom_count());
 			this.packPool.add(vpr);
 		}
+	}	
+	public void startAAPack(){
+		Netlist leafNode = this.root;
+		VPRThread vpr = new VPRThread(this.simulation, leafNode,this.DieNum);
+			
+		vpr.runaapack(leafNode.atom_count());
+		this.packPool.add(vpr);
 	}
 	
 	public void finishTPack(){
 		for(int i=0; i<this.packPool.size(); i++){
-			//if(!this.packPool.get(i).isRunning()){
 			if(!this.packPool.get(i).isRunning(i)){
 				VPRThread vpr = this.packPool.remove(i);
 				int thread = vpr.getThread();
 				this.threadPool.addThread(thread);
-				/* files generated in Eclipse source directory, move the process files to VPR/files folder
-				 * using files.move. --> This leads to additional runtime hence skipped.
-				 */
+	
 				String CurrentDirectory = System.getProperty("user.dir");
-				String file = CurrentDirectory +"/" + this.root.get_blif() + "_" + this.simulation.getSimulationID() + "_" + thread;
-
+				String file = CurrentDirectory +"/" + this.root.get_blif() + "_" + this.simulation.getIntValue("simulation_ID") + "_" + thread;
 				if(!Util.fileExists(file + ".net")){
 		 			Output.println("Netfile " + file + ".net" + " " + "not available");
 		 			Output.println("**** VPR Line ****");
@@ -227,6 +273,33 @@ public class TPack {
 				this.startTPack();
 				i--;
 			}
+		}
+	}
+	public void finishAAPack(){
+
+		for(int i=0; i<this.packPool.size(); i++){
+			while(true) {
+				if(this.packPool.get(i).isRunning(i)){
+				}
+				else {
+					VPRThread vpr = this.packPool.remove(i);
+					String netfile = simulation.getStringValue("circuit") + "_" + this.simulation.getIntValue("simulation_ID") +"_die_" + this.DieNum;
+					String CurrentDirectory = System.getProperty("user.dir");
+					String file = CurrentDirectory +"/" + netfile;
+	
+					if(!Util.fileExists(file + ".net")){
+			 			Output.println("Netfile " + file + ".net" + " " + "not available");
+			 			Output.println("**** VPR Line ****");
+			 			Output.println(vpr.getCommand());
+			 			Output.newLine();
+			 			ErrorLog.print("Netfile " + file + ".net" + " " + "not available");
+			 		}
+	
+			 		this.processNetlistFile(file, vpr.getNetlist());
+					i--;
+					break;
+				}
+			}	
 		}
 	}
 	private String[] getLines(String file){
@@ -353,11 +426,7 @@ public class TPack {
 			int openPos = line.indexOf("\"", namePos+1);
 			int closePos = line.indexOf("\"", openPos+1);
 			String name = line.substring(openPos+1,closePos);
-			if(name.equals("open")){
-				return null;
-			}else{
-				return name;
-			}
+			return name;
 		}else{
 			return null;
 		}
@@ -464,7 +533,30 @@ public class TPack {
  	 					}
  					}
  				}
- 			}
+ 			}else if(parent.getMode().equals("inpad")){ ////////////////////
+ 				String name = parent.getName();
+ 				
+ 				if(!this.netlistInputs.contains(name)) {
+ 					if(parent.numberOfNonEmptyChildBlocks()==1){
+							parent.disable();//This io block is a cut terminal
+						}else{					
+							parent.removeInpadBlock();
+						}
+ 				}else {
+ 					this.netlistInputs.remove(name);
+ 				}
+ 			}else if(parent.getMode().equals("outpad")) { 
+ 				String name = parent.getName();
+ 				if(!this.netlistOutputs.contains(name)) {
+ 					if(parent.numberOfNonEmptyChildBlocks()==1){
+						parent.disable();//This io block is a cut terminal
+					}else{					
+						parent.removeOutpadBlock();
+					}
+ 				}else {
+ 					this.netlistOutputs.remove(name);
+ 				}
+ 			}/////////
  		}
  		if(newLine)Output.newLine();
  	}

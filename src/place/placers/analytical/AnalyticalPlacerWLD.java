@@ -1,16 +1,18 @@
 package place.placers.analytical;
 
 import place.circuit.Circuit;
+import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
 import place.interfaces.Options;
 import place.visual.PlacementVisualizer;
 
 import java.util.Random;
 
-public class AnalyticalPlacerWLD extends AnalyticalPlacer {
+public abstract class AnalyticalPlacerWLD extends AnalyticalPlacer {
 
-    public AnalyticalPlacerWLD(Circuit circuit, Options options, Random random, Logger logger, PlacementVisualizer visualizer) {
-        super(circuit, options, random, logger, visualizer);
+    public AnalyticalPlacerWLD(Circuit[] circuitDie, Options options, Random random, Logger logger, 
+    		PlacementVisualizer[] visualizer, int TotalDies,int SLLrows,TimingGraphSLL timingGraphSys) {
+        super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSys);
     }
 
     @Override
@@ -19,10 +21,11 @@ public class AnalyticalPlacerWLD extends AnalyticalPlacer {
     }
     
     @Override
-    protected void initializeIteration(int iteration){
+    protected void initializeIteration(int iteration, int dieCounter){
+    	this.logger.println("\nInitialise iteration in analytical placer WLD");
     	if(iteration > 0) {
-    		this.anchorWeight *= this.anchorWeightMultiplier;
-    		this.legalizer.multiplySettings();
+    		this.anchorWeight[dieCounter] *= this.anchorWeightMultiplier;
+    		this.legalizer[dieCounter].multiplySettings();
     	}
     }
 
@@ -32,7 +35,7 @@ public class AnalyticalPlacerWLD extends AnalyticalPlacer {
     }
 
 	@Override
-	protected void calculateTimingCost() {
-		this.timingCost = 0;
+	protected void calculateTimingCost(int dieCounter) {
+		this.timingCost[dieCounter] = 0;
 	}
 }

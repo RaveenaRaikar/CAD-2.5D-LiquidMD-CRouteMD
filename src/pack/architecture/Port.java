@@ -10,7 +10,7 @@ public class Port {
 	private String portName;
 	private ArrayList<Pin> pins;
 	private String portClass;
-//	private Boolean equivalent;
+
 	private String equivalent;
 	public Port(Line line, Block parentBlock){
 		this.portType = line.get_type();
@@ -25,7 +25,6 @@ public class Port {
 		if(line.has_property("port_class")) this.portClass = line.get_value("port_class");
 		if(line.has_property("equivalent")){
 			if(line.get_value("equivalent").equalsIgnoreCase("true")){
-				//this.equivalent = Boolean.TRUE;
 				this.equivalent = "true";
 			}else if(line.get_value("equivalent").equalsIgnoreCase("false")){
 				this.equivalent = "false";
@@ -88,7 +87,6 @@ public class Port {
 			}
 			sb.append("\"");
 		}
-		//Output.println("this.equivalent is " + this.equivalent );
 		if(this.portClass != null){
 			sb.append(" ");
 			sb.append("port_class=\"");

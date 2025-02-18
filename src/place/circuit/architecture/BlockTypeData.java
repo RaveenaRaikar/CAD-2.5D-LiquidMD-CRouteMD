@@ -1,13 +1,9 @@
 package place.circuit.architecture;
 
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 import place.util.Triple;
+
+import java.io.Serializable;
+import java.util.*;
 
 class BlockTypeData implements Serializable {
     /**
@@ -76,6 +72,9 @@ class BlockTypeData implements Serializable {
         assert(this.types.get(typeName) == null);
 
         int typeIndex = this.typeNames.size();
+        
+        //fix the type index for SLL blocks
+        
         this.typeNames.add(typeName);
 
         int parentTypeIndex = parentBlockType == null ? -1 : parentBlockType.getTypeIndex();
@@ -97,17 +96,18 @@ class BlockTypeData implements Serializable {
         this.priorities.add(priority);
 
         this.clocked.add(clocked);
+        if(!typeName.equals("EMPTY")) {
+            this.modeNames.add(new ArrayList<String>());
+            this.modes.add(new HashMap<String, Integer>());
+            this.children.add(new ArrayList<Map<BlockType, Integer>>());
 
-        this.modeNames.add(new ArrayList<String>());
-        this.modes.add(new HashMap<String, Integer>());
-        this.children.add(new ArrayList<Map<BlockType, Integer>>());
+            PortTypeData.getInstance().addPorts(typeIndex, inputs, outputs, clocks);
+        }
 
-        PortTypeData.getInstance().addPorts(typeIndex, inputs, outputs, clocks);
 
         return newBlockType;
     }
-
-
+    
     BlockType addMode(BlockType blockType, String modeName) {
         int typeIndex = blockType.getTypeIndex();
 
@@ -144,7 +144,7 @@ class BlockTypeData implements Serializable {
     }
 
     private void cacheChildren() {
-        int numTypes = this.types.size();
+        int numTypes = this.types.size() - 1;
         for(int typeIndex = 0; typeIndex < numTypes; typeIndex++) {
             List<Map<BlockType, Integer>> typeChildren = this.children.get(typeIndex);
             List<List<Integer>> typeChildStarts = new ArrayList<List<Integer>>();
@@ -158,6 +158,7 @@ class BlockTypeData implements Serializable {
                 int numChildren = 0;
 
                 for(Map.Entry<BlockType, Integer> childEntry : typeChildren.get(modeIndex).entrySet()) {
+
                     String childName = childEntry.getKey().getName();
                     int childTypeIndex = this.types.get(new Triple<>(typeIndex, modeIndex, childName));
                     int childCount = childEntry.getValue();
@@ -193,7 +194,18 @@ class BlockTypeData implements Serializable {
 
     int getModeIndex(int typeIndex, String argumentModeName) {
         String modeName = (argumentModeName == null) ? "" : argumentModeName;
-        return this.modes.get(typeIndex).get(modeName);
+        if (modeName.equals("X")){
+            modeName = "";
+            if (this.modes.get(typeIndex).containsKey(modeName)) {
+                return this.modes.get(typeIndex).get(modeName);
+            } else {
+                return 0;
+            }
+        } else {
+            return this.modes.get(typeIndex).get(modeName);
+        }
+
+
     }
 
 
@@ -214,6 +226,10 @@ class BlockTypeData implements Serializable {
     BlockCategory getCategory(int typeIndex) {
         return this.categories.get(typeIndex);
     }
+    
+    BlockCategory setCategory(int typeIndex) {
+        return this.categories.set(typeIndex, BlockCategory.SLLDUMMY);
+    }
     boolean isGlobal(int typeIndex) {
         BlockCategory category = this.getCategory(typeIndex);
         return category != BlockCategory.INTERMEDIATE && category != BlockCategory.LEAF;
@@ -221,6 +237,10 @@ class BlockTypeData implements Serializable {
     boolean isLeaf(int typeIndex) {
         BlockCategory category = this.getCategory(typeIndex);
         return category == BlockCategory.LEAF;
+    }
+    boolean isSLLDummy(int typeIndex) {
+        BlockCategory category = this.getCategory(typeIndex);
+        return category == BlockCategory.SLLDUMMY;
     }
 
     int getHeight(int typeIndex) {

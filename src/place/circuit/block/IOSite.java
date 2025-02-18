@@ -18,8 +18,8 @@ public class IOSite extends AbstractSite {
     private int capacity;
     private Set<GlobalBlock> blocks;
 
-    public IOSite(int x, int y, BlockType blockType, int capacity) {
-        super(x, y, blockType);
+    public IOSite(int die, int x, int y, BlockType blockType, int capacity) {
+        super(die, x, y, blockType);
         this.capacity = capacity;
         this.blocks = new HashSet<GlobalBlock>(capacity);
     }
@@ -45,11 +45,14 @@ public class IOSite extends AbstractSite {
     @Override
     void addBlock(GlobalBlock block) throws FullSiteException {
         if(this.isFull()) {
-            throw new FullSiteException();
+        	if(!this.isVirtual()) {
+        		throw new FullSiteException();
+        	}
         }
 
         this.blocks.add(block);
     }
+    
 
     @Override
     public void removeBlock(GlobalBlock block) throws InvalidBlockException {
@@ -58,6 +61,8 @@ public class IOSite extends AbstractSite {
             throw new InvalidBlockException();
         }
     }
+    
+
 
     @Override
     public void clear() {
@@ -75,4 +80,5 @@ public class IOSite extends AbstractSite {
     public Collection<GlobalBlock> getBlocks() {
         return this.blocks;
     }
+
 }

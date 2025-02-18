@@ -26,7 +26,6 @@ public class Param{
 	private boolean diePart = false;
 		
 	public Param(Simulation simulation,boolean diePart){
-		//this.nparts = 2;
 		this.diePart = diePart;
 
 		this.reconst = 0;
@@ -36,6 +35,7 @@ public class Param{
 		this.ubfactor =  simulation.getIntValue("unbalance_factor");
 		this.maxFanout = simulation.getIntValue("max_fanout");
 		this.ndie = simulation.getIntValue("Number_of_die");
+	
 		this.dieubfactor = simulation.getIntValue("UB_factor_die");
 		if(this.diePart)
 		{
@@ -44,9 +44,9 @@ public class Param{
 			Output.println("The number of parts is " + this.nparts + " and the unbalance factor is " + this.ubfactor);
 		}else {
 			this.nparts = 2;
+			this.ubfactor = simulation.getIntValue("unbalance_factor");
 		}
 				
-		//if(!this.diePart)
 		{
 			if(quality == 1){
 				this.cType = 1;
@@ -134,6 +134,7 @@ public class Param{
 		this.circuitName = simulation.getStringValue("circuit");
 		this.simulationID = simulation.getSimulationID();
 	}
+	
 	public String getHMetisParameters(String tabs){
 		int length = 12;
 		String s = new String();
@@ -158,24 +159,20 @@ public class Param{
 		return this.maxFanout;
 	}
 	public String getGraphFile(int thread){
-		//Output.println("The value of die part in get graph file is " + this.diePart );
 		if(this.diePart)
 		{
-		return this.hmetis_folder + "files/" + this.circuitName + "_" + this.simulationID + "_" + thread + "_top";
-		}else
-		{
-		return this.hmetis_folder + "files/" + this.circuitName + "_" + this.simulationID + "_" + thread;
+			return this.hmetis_folder + "files/" + this.circuitName + "_" + this.simulationID + "_" + thread + "_top";
+		}else{
+			return this.hmetis_folder + "files/" + this.circuitName + "_" + this.simulationID + "_" + thread;
 		}
 	}
 
 	
 	public String[] getHMetisLine(int thread, boolean diePart){
-		//Output.println("Die partitioning in param in get hmetis line is " + diePart);
+
 		this.diePart = diePart;
 		if(diePart)
 		{
-			//Output.println("Is this executed");
-			//for top level die partitioning the number of die will be different.
 			return new String[]{this.hmetis_folder + "hmetis", this.getGraphFile(thread), Util.str(this.ndie), Util.str(this.dieubfactor), Util.str(this.nruns), Util.str(this.cType), Util.str(this.rType), Util.str(this.vCycle), Util.str(this.reconst), Util.str(this.dbglvl)};
 		}
 		return new String[]{this.hmetis_folder + "hmetis", this.getGraphFile(thread), Util.str(this.nparts), Util.str(this.ubfactor), Util.str(this.nruns), Util.str(this.cType), Util.str(this.rType), Util.str(this.vCycle), Util.str(this.reconst), Util.str(this.dbglvl)};

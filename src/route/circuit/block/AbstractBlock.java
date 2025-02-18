@@ -18,7 +18,8 @@ public abstract class AbstractBlock implements Comparable<AbstractBlock> {
     private BlockCategory category;
     private int index;
     private boolean clocked;
-
+    private boolean isSLLSource = false;
+    private boolean isSLLSink = false;
     private List<LocalBlock> children;
     private List<AbstractPin> pins;
 
@@ -27,7 +28,6 @@ public abstract class AbstractBlock implements Comparable<AbstractBlock> {
         this.blockType = blockType;
         this.category = blockType.getCategory();
         this.index = index;
-
         this.clocked = blockType.isClocked();
 
         int numChildren = blockType.getNumChildren();
@@ -62,8 +62,24 @@ public abstract class AbstractBlock implements Comparable<AbstractBlock> {
         }
     }
 
+    public void setSLLSourceBlock() {
+    	this.isSLLSource = true;
+    }
 
-
+    public void setSLLSinkBlock() {
+    	this.isSLLSink = true;
+    }
+    
+    
+    public Boolean getSLLSourceBlock() {
+    	return this.isSLLSource;
+    }
+    
+    public Boolean getSLLSinkBlock() {
+    	return this.isSLLSink;
+    }
+    
+    
     public String getName() {
         return this.name;
     }

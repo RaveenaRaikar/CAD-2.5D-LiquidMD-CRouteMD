@@ -7,11 +7,12 @@ import java.util.Random;
 
 import place.circuit.Circuit;
 import place.circuit.timing.TimingGraph;
+import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
 import place.interfaces.Options;
 import place.visual.PlacementVisualizer;
 
-public class AnalyticalPlacerTD extends AnalyticalPlacer {
+public abstract class AnalyticalPlacerTD extends AnalyticalPlacer {
 
     private static final String
         O_CRITICALITY_EXPONENT = "criticality exponent",
@@ -46,34 +47,42 @@ public class AnalyticalPlacerTD extends AnalyticalPlacer {
     private static String 
     	T_UPDATE_CRIT_CON = "update critical connections";
 
-    private double criticalityExponent, criticalityThreshold, maxPerCritEdge;
-    private TimingGraph timingGraph;
+    private double[] criticalityExponent, criticalityThreshold, maxPerCritEdge;
+    private TimingGraph[] timingGraph;
+    private double maxSystemDelay = 0;
+    private CriticalityCalculator[] criticalityCalculator;
 
-    private CriticalityCalculator criticalityCalculator;
+    public AnalyticalPlacerTD(Circuit[] circuitDie, Options options, Random random, Logger logger, 
+    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSys) {
+        super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSys);
 
-    public AnalyticalPlacerTD(Circuit circuit, Options options, Random random, Logger logger, PlacementVisualizer visualizer) {
-        super(circuit, options, random, logger, visualizer);
-
-        this.criticalityExponent = options.getDouble(O_CRITICALITY_EXPONENT);
-        this.criticalityThreshold = options.getDouble(O_CRITICALITY_THRESHOLD);
-        this.maxPerCritEdge = options.getDouble(O_MAX_PER_CRIT_EDGE);
+        this.criticalityExponent[TotalDies] = options.getDouble(O_CRITICALITY_EXPONENT);
+        this.criticalityThreshold[TotalDies] = options.getDouble(O_CRITICALITY_THRESHOLD);
+        this.maxPerCritEdge[TotalDies] = options.getDouble(O_MAX_PER_CRIT_EDGE);
 
         this.tradeOff = options.getDouble(O_TRADE_OFF);
 
-        this.timingGraph = this.circuit.getTimingGraph();
+        
     }
 
     @Override
     public void initializeData() {
         super.initializeData();
+        
+        int dieCounter = 0;
+        this.maxSystemDelay = this.timingGraphSLL.getTotalMaxDelay();
+        while(dieCounter < this.TotalDies) {
+        	this.timingGraph[dieCounter] = this.circuitDie[dieCounter].getTimingGraph();
+            this.timingGraph[dieCounter].setCriticalityExponent(this.criticalityExponent[dieCounter]);
+            this.timingGraph[dieCounter].calculateCriticalities(true);
 
-        this.timingGraph.setCriticalityExponent(this.criticalityExponent);
-        this.timingGraph.calculateCriticalities(true);
-
-        this.criticalityCalculator = new CriticalityCalculator(
-                this.circuit,
-                this.netBlocks,
-                this.timingNets);
+            this.criticalityCalculator[dieCounter] = new CriticalityCalculator(
+                    this.circuitDie[dieCounter],
+                    this.netBlocks.get(dieCounter),
+                    this.timingNets[dieCounter]);
+            dieCounter++;
+        }
+        
     }
 
     @Override
@@ -82,63 +91,63 @@ public class AnalyticalPlacerTD extends AnalyticalPlacer {
     }
 
     @Override
-    protected void initializeIteration(int iteration) {
+    protected void initializeIteration(int iteration, int dieNumber) {
 
-    	this.startTimer(T_UPDATE_CRIT_CON);
-    	this.updateCriticalConnections();
-    	this.stopTimer(T_UPDATE_CRIT_CON);
+    	this.startTimer(T_UPDATE_CRIT_CON, dieNumber);
+    	this.updateCriticalConnections(dieNumber);
+    	this.stopTimer(T_UPDATE_CRIT_CON, dieNumber);
 
         if(iteration > 0) {
-            this.anchorWeight *= this.anchorWeightMultiplier;
-            this.legalizer.multiplySettings();
+            this.anchorWeight[dieNumber] *= this.anchorWeightMultiplier;
+            this.legalizer[dieNumber].multiplySettings();
         }
     }
 
-    private void updateCriticalConnections() {
+    private void updateCriticalConnections(int dieNumber) {
 
-        for(TimingNet net : this.timingNets) {
+        for(TimingNet net : this.timingNets[dieNumber]) {
             for(TimingNetBlock sink : net.sinks) {
             	sink.updateCriticality();
             }
         }
 
         List<Double> criticalities = new ArrayList<>();
-        for(TimingNet net : this.timingNets) {
+        for(TimingNet net : this.timingNets[dieNumber]) {
             NetBlock source = net.source;
             for(TimingNetBlock sink : net.sinks) {
-            	if(sink.criticality > this.criticalityThreshold) {
+            	if(sink.criticality > this.criticalityThreshold[dieNumber]) {
             		if(source.blockIndex != sink.blockIndex) {
             			criticalities.add(sink.criticality);
             		}
             	}
         	}
         }
-        double minimumCriticality = this.criticalityThreshold;
-        int maxNumCritConn = (int) Math.round(this.numRealConn * this.maxPerCritEdge / 100);
+        double minimumCriticality = this.criticalityThreshold[dieNumber];
+        int maxNumCritConn = (int) Math.round(this.numRealConn[dieNumber] * this.maxPerCritEdge[dieNumber] / 100);
         if(criticalities.size() > maxNumCritConn){
         	Collections.sort(criticalities);
         	minimumCriticality = criticalities.get(criticalities.size() - 1 - maxNumCritConn);
         }
 
-        this.criticalConnections.clear();
-        for(TimingNet net : this.timingNets) {
+        this.criticalConnections[dieNumber].clear();
+        for(TimingNet net : this.timingNets[dieNumber]) {
             NetBlock source = net.source;
             for(TimingNetBlock sink : net.sinks) {
             	if(sink.criticality > minimumCriticality) {
             		if(source.blockIndex != sink.blockIndex) {
             			CritConn c = new CritConn(source.blockIndex, sink.blockIndex, source.offset, sink.offset, (float)(this.tradeOff * sink.criticality));
-            			this.criticalConnections.add(c);
+            			this.criticalConnections[dieNumber].add(c);
             		}
             	}
         	}
         }
 
-        this.legalizer.updateCriticalConnections(this.criticalConnections);
+        this.legalizer[dieNumber].updateCriticalConnections(this.criticalConnections[dieNumber]);
     }
 
     @Override
-    protected void calculateTimingCost() {
-        this.timingCost = this.criticalityCalculator.calculate(this.legalX, this.legalY);
+    protected void calculateTimingCost(int dieNumber) {
+        this.timingCost[dieNumber] = this.criticalityCalculator[dieNumber].calculate(this.legalX.get(dieNumber), this.legalY.get(dieNumber));
     }
 
     @Override

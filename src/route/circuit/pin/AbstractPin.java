@@ -18,6 +18,8 @@ public abstract class AbstractPin {
     private int numSinks = 0;
     
     private TimingNode timingNode;
+    private Boolean isSLLSource = false;
+    private Boolean isSLLSink = false;
 
     public AbstractPin(AbstractBlock owner, PortType portType, int index) {
         this.owner = owner;
@@ -27,6 +29,22 @@ public abstract class AbstractPin {
         this.timingNode = null;
     }
 
+    public Boolean getSLLSourceStatus() {
+    	return this.isSLLSource;
+    }
+    public void setSLLsourceStatus() {
+    	this.isSLLSource = true;
+    }
+    
+    public Boolean getSLLSinkStatus() {
+    	return this.isSLLSink;
+    }
+    public void setSLLSinkStatus() {
+    	this.isSLLSink = true;
+    }
+    
+    
+    
     public AbstractBlock getOwner() {
         return this.owner;
     }

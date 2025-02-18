@@ -1,32 +1,18 @@
 package place.circuit.architecture;
 
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
+import org.w3c.dom.*;
 import org.xml.sax.SAXException;
-
 import place.circuit.exceptions.InvalidFileFormatException;
 import place.util.Pair;
 import place.util.Triple;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.Serializable;
-import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Stack;
-
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.xpath.*;
+import java.io.*;
+import java.nio.file.Files;
+import java.util.*;
 
 /**
  * We make a lot of assumptions while parsing an architecture XML file.
@@ -51,9 +37,11 @@ public class Architecture implements Serializable {
 
 
     private boolean autoSize;
-    private int width, height;
+    private int width, height, totDie;
     private double autoRatio;
 
+    private int sllRows;
+    public float sllDelay;
     private File architectureFile, blifFile, netFile;
     private String circuitName;
 
@@ -61,71 +49,89 @@ public class Architecture implements Serializable {
     private transient List<Pair<PortType, Double>> setupTimes = new ArrayList<>();
     private transient List<Triple<PortType, PortType, Double>> delays = new ArrayList<>();
     private transient Map<String, Integer> directs = new HashMap<>();
+    private transient Map<String, Map<String, String>> directMap = new HashMap();
 
     private DelayTables delayTables;
 
     private int ioCapacity;
 
+    private Document xmlDocument;
+    private XPath xPath = XPathFactory.newInstance().newXPath();
 
     public Architecture(
             String circuitName,
             File architectureFile,
             File blifFile,
-            File netFile) {
+            File netFile,
+            int totDie,
+            int sllRows,
+            float sllDelay) {
 
         this.architectureFile = architectureFile;
 
         this.blifFile = blifFile;
         this.netFile = netFile;
-
+        this.totDie = totDie;
         this.circuitName = circuitName;
+        this.sllRows = sllRows;
+        this.sllDelay = sllDelay;
     }
 
     public void parse() throws ParseException, IOException, InvalidFileFormatException, InterruptedException, ParserConfigurationException, SAXException {
 
         // Build a XML root
         DocumentBuilder xmlBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-        Document xmlDocument = xmlBuilder.parse(this.architectureFile);
-        Element root = xmlDocument.getDocumentElement();
-
+        this.xmlDocument = xmlBuilder.parse(this.architectureFile);
+        Element root = this.xmlDocument.getDocumentElement();
+        
         // Get the architecture size (fixed or automatic)
         this.processLayout(root);
 
         // Store the models to know which ones are clocked
         this.processModels(root);
 
-        // The device, switchlist and segmentlist tags are ignored: we leave these complex calculations to VPR
-        // Proceed with directlist
         this.processDirects(root);
 
         // Get all the complex block types and their ports and delays
         this.processBlocks(root);
 
-        // Cache some frequently used data
         BlockTypeData.getInstance().postProcess();
-
         // All delays have been cached in this.delays, process them now
         this.processDelays();
 
-        // Set all delays to 0
-        // This is only useful while debugging,
-        // because the call to vpr takes a really
-        // long time for large circuits
         this.delayTables = new DelayTables();
+
     }
 
 
     private void processLayout(Element root) {
         Element layoutElement = this.getFirstChild(root, "layout");
-
-        this.autoSize = layoutElement.hasAttribute("auto");
-        if(this.autoSize) {
-            this.autoRatio = Double.parseDouble(layoutElement.getAttribute("auto"));
+        NodeList autoLayoutList = layoutElement.getElementsByTagName("auto_layout");
+        NodeList fixedLayoutList = layoutElement.getElementsByTagName("fixed_layout");
+        if (autoLayoutList.getLength() > 0 && autoLayoutList.item(0).getNodeType() == Node.ELEMENT_NODE){
+            this.autoSize = true;
+            Element autoLayout = (Element) autoLayoutList.item(0);
+            this.autoRatio = Double.parseDouble(autoLayout.getAttribute("aspect_ratio"));
+        } else if(fixedLayoutList.getLength() > 0) {
+        	Element fixedSizeLayout = (Element) fixedLayoutList.item(0);
+        	
+        	this.width = Integer.parseInt(fixedSizeLayout.getAttribute("width"));
+            this.height = Integer.parseInt(fixedSizeLayout.getAttribute("height"));
+            System.out.print("\nDimensions of chip: " + this.width +" x " + this.height);
+            this.height = this.height/this.totDie;
+            System.out.print("\nDimensions of die: " + this.width +" x " + this.height);
 
         } else {
-            this.width = Integer.parseInt(layoutElement.getAttribute("width"));
-            this.height = Integer.parseInt(layoutElement.getAttribute("height"));
+            NodeList fixedLayout = layoutElement.getElementsByTagName("fixed_layout ");
+            this.autoSize = layoutElement.hasAttribute("auto");
+            if (this.autoSize) {
+                this.autoRatio = Double.parseDouble(layoutElement.getAttribute("auto"));
+            } else {
+                this.width = Integer.parseInt(layoutElement.getAttribute("width"));
+                this.height = Integer.parseInt(layoutElement.getAttribute("height"));
+            }
         }
+    
     }
 
 
@@ -166,20 +172,20 @@ public class Architecture implements Serializable {
 
         List<Element> directElements = this.getChildElementsByTagName(directsElement, "direct");
         for(Element directElement : directElements) {
-
+        	Map<String, String> portMap = new HashMap<>();
             String[] fromPort = directElement.getAttribute("from_pin").split("\\.");
             String[] toPort = directElement.getAttribute("to_pin").split("\\.");
 
             int offsetX = Integer.parseInt(directElement.getAttribute("x_offset"));
             int offsetY = Integer.parseInt(directElement.getAttribute("y_offset"));
             int offsetZ = Integer.parseInt(directElement.getAttribute("z_offset"));
+            
+            portMap.put(fromPort[1], toPort[1]);
+            this.directMap.put(fromPort[0], portMap);
 
             // Directs can only go between blocks of the same type
             assert(fromPort[0].equals(toPort[0]));
 
-            // ASM: macro's can only extend in the y direction
-            // if offsetX is different from 0, this is a direct
-            // connection that is not used as a carry chain
             if(offsetX == 0 && offsetZ == 0) {
                 String id = this.getDirectId(fromPort[0], fromPort[1], toPort[1]);
                 this.directs.put(id, offsetY);
@@ -194,15 +200,109 @@ public class Architecture implements Serializable {
 
 
     private void processBlocks(Element root) throws ParseException {
+
         Element blockListElement = this.getFirstChild(root, "complexblocklist");
         List<Element> blockElements = this.getChildElementsByTagName(blockListElement, "pb_type");
 
-        for(Element blockElement : blockElements) {
-            this.processBlockElement(null, blockElement);
+        Element tilesElement = this.getFirstChild(root, "tiles");
+        if (tilesElement == null) {
+            for(Element blockElement : blockElements) {
+                this.processBlockElement_v7(null, blockElement);
+            }
+        } else {
+            List<Element> tileElements = this.getChildElementsByTagName(blockListElement, "tile");
+            Element layoutElement = this.getFirstChild(root, "layout");
+            
+                for(Element blockElement : blockElements) {
+                	
+                	if(blockElement.getAttribute("name").equals("alb")) {	
+                		this.CreateVirtualSllBlocks(null,blockElement);
+                		this.processBlockElement_v8(null, blockElement);
+                		
+                	}else {
+                		this.processBlockElement_v8(null, blockElement);
+                	}
+                }
+                this.createEmptySite();
         }
+
+
+    }
+    private BlockType createEmptySite() {
+    	BlockCategory blockCategory = BlockCategory.EMPTY;
+    	int start = 0, repeat = this.width-1, height = 1, priority = 500;
+    	Boolean isClocked = false;
+        String blockName = "EMPTY";
+        BlockType blockType = BlockTypeData.getInstance().addType(
+                null,
+                blockName,
+                blockCategory,
+                height,
+                start,
+                repeat,
+                priority,
+                isClocked,
+                null,
+                null,
+                null);
+        
+        return blockType;
     }
 
-    private BlockType processBlockElement(BlockType parentBlockType, Element blockElement) throws ParseException {
+    private BlockType CreateVirtualSllBlocks(BlockType parentBlockType, Element blockElement) throws ParseException{
+    	String blockName = "alb";
+    	BlockCategory blockCategory = BlockCategory.SLLDUMMY;
+    	int start = -1, repeat = -1, height = -1, priority = -1;
+    	Boolean isClocked = true;
+    	
+    	NodeList heightResult = this.xPathQuery(String.format("//tile[descendant::site[@pb_type='%s']][1]//@height", blockName));
+        if (heightResult != null){
+            Attr heightAttr = (Attr) heightResult.item(0);
+            height = Integer.parseInt(heightAttr.getValue());
+        } else {
+            height = 1;
+        }
+
+        // Query layout tag associated with given pb_type. (ex: <fill .. />, <col ../> etc.)
+        NodeList layoutResult = this.xPathQuery(String.format("//layout//*[@type=//tile[descendant::site[@pb_type='%s']][1]/@name]", blockName));
+        if (layoutResult == null){
+            System.out.println(String.format("Missing layout tag for pb_type '%s'", blockName));
+            System.exit(1);
+        }
+
+        // We only look at the first element (tool can't handle e.g. multiple columns)
+        Element layout = (Element)layoutResult.item(0);
+
+        // Query for layout type tag
+        start=0;
+        repeat =1;
+        priority =49;
+        
+        blockName = "DummyAlb";
+     // Build maps of inputs and outputs
+        Map<String, Integer> inputs = this.getPorts(blockElement, "input");
+        Map<String, Integer> outputs = this.getPorts(blockElement, "output");
+        Map<String, Integer> clockPorts = this.getPorts(blockElement, "clock");
+        
+       // if(blockCategory == BlockCategory.IO)
+
+        BlockType blockType = BlockTypeData.getInstance().addType(
+                parentBlockType,
+                blockName,
+                blockCategory,
+                height,
+                start,
+                repeat,
+                priority,
+                isClocked,
+                inputs,
+                outputs,
+                clockPorts);
+        
+        return blockType;
+    	
+    }
+    private BlockType processBlockElement_v7(BlockType parentBlockType, Element blockElement) throws ParseException {
         String blockName = blockElement.getAttribute("name");
 
         boolean isGlobal = this.isGlobal(blockElement);
@@ -213,7 +313,6 @@ public class Architecture implements Serializable {
         // Set block category, and some related properties
         BlockCategory blockCategory;
 
-        // ASM: IO blocks are around the perimeter, HARDBLOCKs are in columns,
         // CLB blocks fill the rest of the FPGA
         int start = -1, repeat = -1, height = -1, priority = -1;
 
@@ -228,14 +327,9 @@ public class Architecture implements Serializable {
             // Get some extra properties that relate to the placement
             // of global blocks
 
-            blockCategory = this.getGlobalBlockCategory(blockElement);
+            blockCategory = this.getGlobalBlockCategory_v7(blockElement);
 
             if(blockCategory == BlockCategory.IO) {
-                // ASM: io blocks are always placed around the perimeter of the
-                // architecture, ie. "<loc type="perimeter">" is set.
-                // This assumption is used throughout this entire placement suite.
-                // Many changes will have to be made in the different algorithms
-                // in order to get rid of this assumption.
                 this.ioCapacity = Integer.parseInt(blockElement.getAttribute("capacity"));
 
             } else {
@@ -360,8 +454,182 @@ public class Architecture implements Serializable {
         return blockType;
     }
 
+    private BlockType processBlockElement_v8(BlockType parentBlockType, Element blockElement) throws ParseException {
+    	//Identify all the blocks in the architecture file and build the blocktype category.
+        String blockName = blockElement.getAttribute("name");
+
+        boolean isGlobal = this.isGlobal(blockElement);
+        boolean isLeaf = this.isLeaf(blockElement);
+        boolean isClocked = this.isClocked(blockElement);
 
 
+        // Set block category, and some related properties
+        BlockCategory blockCategory;
+
+        // CLB blocks fill the rest of the FPGA
+        int start = -1, repeat = -1, height = -1, priority = -1;
+
+
+        if(isLeaf) {
+            blockCategory = BlockCategory.LEAF;
+
+        } else if(!isGlobal) {
+            blockCategory = BlockCategory.INTERMEDIATE;
+
+        } else {
+            // Get some extra properties that relate to the placement
+            // of global blocks
+        	    	
+            blockCategory = this.getGlobalBlockCategory_v8(blockElement);
+
+            if(blockCategory == BlockCategory.IO) {
+                // Query for optional capacity attribute, default is 1
+                NodeList capacityResult = this.xPathQuery(String.format("//tile[descendant::site[@pb_type='%s']][1]//@capacity", blockName));
+                if (capacityResult != null){
+                    Attr capacityAttr = (Attr) capacityResult.item(0);
+                    this.ioCapacity = Integer.parseInt(capacityAttr.getValue());
+                } else {
+                    this.ioCapacity = 1;
+                }
+
+            } else {
+
+                // Query for optional height attribute, default is 1
+                NodeList heightResult = this.xPathQuery(String.format("//tile[descendant::site[@pb_type='%s']][1]//@height", blockName));
+                if (heightResult != null){
+                    Attr heightAttr = (Attr) heightResult.item(0);
+                    height = Integer.parseInt(heightAttr.getValue());
+                   // System.out.print("\nThe height is " + height + " and the blockName is " + blockName);
+                } else {
+                    height = 1;
+                }
+
+                // Query layout tag associated with given pb_type. (ex: <fill .. />, <col ../> etc.)
+                NodeList layoutResult = this.xPathQuery(String.format("//layout//*[@type=//tile[descendant::site[@pb_type='%s']][1]/@name]", blockName));
+                if (layoutResult == null){
+                    System.out.println(String.format("Missing layout tag for pb_type '%s'", blockName));
+                    System.exit(1);
+                }
+
+                // We only look at the first element (tool can't handle e.g. multiple columns)
+                Element layout = (Element)layoutResult.item(0);
+
+                // Query for required priority attribute
+                priority = Integer.parseInt(layout.getAttribute("priority"));
+
+                // Query for layout type tag
+                String type = layout.getNodeName();
+
+                assert(!type.equals("rel"));
+
+                if(type.equals("col")) {
+                    start = Integer.parseInt(layout.getAttribute("startx"));
+
+                    if(layout.hasAttribute("repeatx")) {
+                        repeat = Integer.parseInt(layout.getAttribute("repeatx"));
+                    } else {
+                        repeat = -1;
+                        // If start is 0 and repeat is -1, the column calculation in Circuit.java fails
+                        assert(start != 0);
+                    }
+                } else if(type.equals("fill")) {
+                    start = 0;
+                    repeat = 1;
+
+                } else {
+                    assert(false);
+                }
+            }
+
+        }
+
+        // Build maps of inputs and outputs
+        Map<String, Integer> inputs = this.getPorts(blockElement, "input");
+        Map<String, Integer> outputs = this.getPorts(blockElement, "output");
+        Map<String, Integer> clockPorts = this.getPorts(blockElement, "clock");
+        
+       // if(blockCategory == BlockCategory.IO)
+
+        BlockType blockType = BlockTypeData.getInstance().addType(
+                parentBlockType,
+                blockName,
+                blockCategory,
+                height,
+                start,
+                repeat,
+                priority,
+                isClocked,
+                inputs,
+                outputs,
+                clockPorts);
+
+        // If block type is null, this means that there are two block
+        // types in the architecture file that we cannot differentiate.
+        // This should of course never happen.
+        assert(blockType != null);
+
+        // Set the carry chain, if there is one
+        Pair<PortType, PortType> direct = this.getDirect(blockType, blockElement);
+
+        if(direct != null) {
+//        	System.out.print("\nIs this true");
+            PortType carryFromPort = direct.getFirst();
+            PortType carryToPort = direct.getSecond();
+
+            String directId = this.getDirectId(
+                    blockType.getName(),
+                    carryFromPort.getName(),
+                    carryToPort.getName());
+            int offsetY = this.directs.get(directId);
+
+            PortTypeData.getInstance().setCarryPorts(carryFromPort, carryToPort, offsetY);
+        }
+
+        // Add the different modes and process the children for that mode
+        /* Ugly data structure, but otherwise we would have to split it up
+         * in multiple structures. Each pair in the list represents a mode
+         * of this block type and its properties.
+         *   - the first part is a pair that contains a mode name and the
+         *     corresponding mode element
+         *   - the second part is a list of child types. For each child
+         *     type the number of children and the corresponding child
+         *     Element are stored.
+         */
+        List<Pair<Pair<BlockType, Element>, List<Pair<Integer, BlockType>>>> modesAndChildren = this.getModesAndChildren(blockType, blockElement);
+
+        for(Pair<Pair<BlockType, Element>, List<Pair<Integer, BlockType>>> modeAndChildren : modesAndChildren) {
+
+            Pair<BlockType, Element> mode = modeAndChildren.getFirst();
+            BlockType blockTypeWithMode = mode.getFirst();
+            Element modeElement = mode.getSecond();
+
+            List<BlockType> blockTypes = new ArrayList<>();
+            blockTypes.add(blockType);
+
+            // Add all the child types
+            for(Pair<Integer, BlockType> child : modeAndChildren.getSecond()) {
+                Integer numChildren = child.getFirst();
+                BlockType childBlockType = child.getSecond();
+                blockTypes.add(childBlockType);
+
+                BlockTypeData.getInstance().addChild(blockTypeWithMode, childBlockType, numChildren);
+            }
+
+            // Cache delays to and from this element
+            // We can't store them in PortTypeData until all blocks have been stored
+            this.cacheDelays(blockTypes, modeElement);
+        }
+
+        // Cache setup times (time from input to clock, and from clock to output)
+        this.cacheSetupTimes(blockType, blockElement);
+       
+
+        return blockType;
+    }
+
+
+
+    
     private boolean isLeaf(Element blockElement) {
         if(this.hasImplicitChildren(blockElement)) {
             return false;
@@ -408,27 +676,25 @@ public class Architecture implements Serializable {
     }
 
 
-    private BlockCategory getGlobalBlockCategory(Element blockElement) throws ParseException {
-        // Check if this block type should fill the FPGA
-        // If it does, we call this the CLB type (there can
-        // only be one clb type in an architecture)
-        Element locElement = this.getFirstChild(this.getFirstChild(blockElement, "gridlocations"), "loc");
-        String type = locElement.getAttribute("type");
-
-        if(type.equals("fill")) {
-            return BlockCategory.CLB;
+    private BlockCategory getGlobalBlockCategory_v7(Element blockElement) throws ParseException {
+   
+        Element gridLocations = this.getFirstChild(blockElement, "gridlocations");
+        if(gridLocations != null){
+            Element locElement = this.getFirstChild(gridLocations, "loc");
+            String type = locElement.getAttribute("type");
+            if(type.equals("fill")) {
+                return BlockCategory.CLB;
+            }
+        } else {
+            return null;
         }
 
-        // Descend down until a leaf block is found
-        // If the leaf block has has blif_model .input or
-        // .output, this is the io block type (there can
-        // only be one io type in an architecture)
         Stack<Element> elements = new Stack<Element>();
         elements.add(blockElement);
 
         while(elements.size() > 0) {
             Element element = elements.pop();
-
+            String name = element.getAttribute("name");
             String blifModel = element.getAttribute("blif_model");
             if(blifModel.equals(".input") || blifModel.equals(".output")) {
                 return BlockCategory.IO;
@@ -439,6 +705,7 @@ public class Architecture implements Serializable {
             modeElements.add(element);
 
             for(Element modeElement : modeElements) {
+                name = modeElement.getAttribute("name");
                 elements.addAll(this.getChildElementsByTagName(modeElement, "pb_type"));
             }
         }
@@ -446,7 +713,58 @@ public class Architecture implements Serializable {
         return BlockCategory.HARDBLOCK;
     }
 
+    private BlockCategory getGlobalBlockCategory_v8(Element blockElement) throws ParseException {
+        // Check if this block type should fill the FPGA, in v8 this is found under layout
+        // If it does, we call this the CLB type (there can
+        // only be one clb type in an architecture)
 
+        // To find layout type for block element:
+        // first step: which tile implements pb_type?
+        // second step: get layout type for tile
+        String pbTypeName = blockElement.getAttribute("name");
+        String layoutType;
+        try {
+            XPathExpression expr = this.xPath.compile(String.format("//layout//*[@type=//tile[descendant::site[@pb_type='%s']][1]/@name][1]", pbTypeName));
+            NodeList result = (NodeList) expr.evaluate(this.xmlDocument, XPathConstants.NODESET);
+            layoutType = result.item(0).getNodeName();
+        } catch (XPathExpressionException e) {
+            layoutType = "";
+            System.out.println(String.format("Found no layout for pb_type name=\"%s\"", pbTypeName));
+            System.exit(1);
+        }
+
+
+        if(layoutType.equals("fill")) {
+            return BlockCategory.CLB;
+        }
+
+
+        // Descend down until a leaf block is found
+        // If the leaf block has has blif_model .input or
+        // .output, this is the io block type (there can
+        // only be one io type in an architecture)
+        Stack<Element> elements = new Stack<Element>();
+        elements.add(blockElement);
+
+        while(elements.size() > 0) {
+            Element element = elements.pop();
+            String name = element.getAttribute("name");
+            String blifModel = element.getAttribute("blif_model");
+            if(blifModel.equals(".input") || blifModel.equals(".output")) {
+                return BlockCategory.IO;
+            }
+
+            List<Element> modeElements = this.getChildElementsByTagName(element, "mode");
+            modeElements.add(element);
+
+            for(Element modeElement : modeElements) {
+                name = modeElement.getAttribute("name");
+                elements.addAll(this.getChildElementsByTagName(modeElement, "pb_type"));
+            }
+        }
+
+        return BlockCategory.HARDBLOCK;
+    }
 
     private Map<String, Integer> getPorts(Element blockElement, String portType) {
         Map<String, Integer> ports = new HashMap<>();
@@ -465,39 +783,33 @@ public class Architecture implements Serializable {
 
     private Pair<PortType, PortType> getDirect(BlockType blockType, Element blockElement) {
 
+    	
+    	//The architecture file description has changed and we need to use a new method.
+    	//the directMap has name of the block followed by the output and then input.
         PortType carryFromPort = null, carryToPort = null;
 
-        Element fcElement = this.getFirstChild(blockElement, "fc");
-        if(fcElement == null) {
-            return null;
+        if(this.directMap.keySet().contains(blockType.getName())) {
+        	Map<String, String> portMap = this.directMap.get(blockType.getName());
+        	for(String portnames: portMap.keySet()) {
+        		String outPortName = portnames;
+        		String inPortName = portMap.get(outPortName);
+        		PortType outPortType = new PortType(blockType, outPortName);
+        		PortType inPortType = new PortType(blockType, inPortName);
+        		
+        		assert(carryToPort == null);
+        		carryToPort = inPortType;
+        		assert(carryFromPort == null);
+        		carryFromPort = outPortType;
+                
+        	}
         }
-
-        List<Element> pinElements = this.getChildElementsByTagName(fcElement, "pin");
-        for(Element pinElement : pinElements) {
-            double fcVal = Double.parseDouble(pinElement.getAttribute("fc_val"));
-
-            if(fcVal == 0) {
-                String portName = pinElement.getAttribute("name");
-                PortType portType = new PortType(blockType, portName);
-
-                if(portType.isInput()) {
-                    assert(carryToPort == null);
-                    carryToPort = portType;
-
-                } else {
-                    assert(carryFromPort == null);
-                    carryFromPort = portType;
-                }
-            }
-        }
-
-        // carryInput and carryOutput must simultaneously be set or be null
         assert(!(carryFromPort == null ^ carryToPort == null));
         if(carryFromPort == null) {
             return null;
         } else {
             return new Pair<PortType, PortType>(carryFromPort, carryToPort);
         }
+        
     }
 
 
@@ -512,10 +824,6 @@ public class Architecture implements Serializable {
             switch(blockElement.getAttribute("class")) {
                 case "lut":
                 {
-                    // ASM: luts have two hardcoded modes that are not defined in the arch file:
-                    //  - one with the same name as the block type (e.g. lut5 or lut6). In this mode
-                    //    it has one child "lut".
-                    //  - "wire": no children
 
                     BlockType blockTypeWithMode = BlockTypeData.getInstance().addMode(blockType, blockName);
                     Pair<BlockType, Element> mode = new Pair<>(blockTypeWithMode, blockElement);
@@ -537,9 +845,6 @@ public class Architecture implements Serializable {
 
                 case "memory":
                 {
-                    // ASM: blocks of class "memory" have one mode "memory_slice" and x children of type
-                    // "memory_slice", where x can be determined from the number of output pins in an
-                    // output port with a class that begins with "data_out"
 
                     // Determine the number of children
                     int numChildren = -1;
@@ -575,7 +880,7 @@ public class Architecture implements Serializable {
             }
 
         } else if(this.isLeaf(blockElement)) {
-            // ASM: Leafs have 1 unnamed mode without children
+          
             BlockType blockTypeWithMode = BlockTypeData.getInstance().addMode(blockType, "");
             Pair<BlockType, Element >mode = new Pair<>(blockTypeWithMode, blockElement);
             List<Pair<Integer, BlockType>> modeChildren = new ArrayList<>();
@@ -602,10 +907,9 @@ public class Architecture implements Serializable {
                 List<Element> childElements = this.getChildElementsByTagName(modeElement, "pb_type");
                 for(Element childElement : childElements) {
                     int numChildren = Integer.parseInt(childElement.getAttribute("num_pb"));
-                    BlockType childBlockType = this.processBlockElement(blockTypeWithMode, childElement);
+                    BlockType childBlockType = this.processBlockElement_v7(blockTypeWithMode, childElement);
                     modeChildren.add(new Pair<>(numChildren, childBlockType));
                 }
-
                 modesAndChildren.add(new Pair<>(mode, modeChildren));
             }
         }
@@ -640,7 +944,7 @@ public class Architecture implements Serializable {
         // Process delays
         Element delayMatrixElement = this.getFirstChild(parentBlockElement, "delay_matrix");
 
-        // ASM: all delays are equal and type is "max"
+ 
         String sourcePortName = delayMatrixElement.getAttribute("in_port").split("\\.")[1];
         PortType sourcePortType = new PortType(lutBlockType, sourcePortName);
         String sinkPortName = delayMatrixElement.getAttribute("out_port").split("\\.")[1];
@@ -749,23 +1053,13 @@ public class Architecture implements Serializable {
             this.setupTimes.add(new Pair<PortType, Double>(portType, delay));
         }
 
-        // ASM: delay_matrix elements only occur in blocks of class "lut"
-        // These are processed in addImplicitLut()
+
     }
 
 
     private void cacheDelays(List<BlockType> blockTypes, Element modeElement) {
 
-        /* ASM: delays are defined in a delay_constant tag. These tags are children of
-         * one of the next elements:
-         *   - modeElement
-         *   - modeElement - <interconnect> - <direct>
-         *   - modeElement - <interconnect> - <complete>
-         *   - modeElement - <interconnect> - <mux>
-         *   - child <direct> elements of modeElement
-         * One exception are luts: the lut delays are defined in a delay_matrix element.
-         * See addImplicitLut().
-         */
+
 
         List<Element> elements = new ArrayList<Element>();
         elements.add(modeElement);
@@ -830,7 +1124,7 @@ public class Architecture implements Serializable {
             PortType sourcePortType = delayEntry.getFirst();
             PortType sinkPortType = delayEntry.getSecond();
             double delay = delayEntry.getThird();
-
+ 
             sourcePortType.setDelay(sinkPortType, delay);
         }
     }
@@ -877,13 +1171,12 @@ public class Architecture implements Serializable {
 
     public void getVprTiming(String vprCommand) throws IOException, InterruptedException, InvalidFileFormatException {
         // For this method to work, the macro PRINT_ARRAYS should be defined
-        // in vpr: place/timing_place_lookup.c
 
-        // Run vpr
         String command = String.format(
                 "%s %s %s --blif_file %s --net_file %s --place_file vpr_tmp.place --place --init_t 1 --exit_t 1",
                 vprCommand, this.architectureFile, this.circuitName, this.blifFile, this.netFile);
-
+        System.out.print(command +"\n");
+        
         Process process = null;
         process = Runtime.getRuntime().exec(command);
 
@@ -895,7 +1188,7 @@ public class Architecture implements Serializable {
 
 
         // Build delay tables
-        String lookupDumpPath = "lookup_dump.echo";
+        String lookupDumpPath = "placement_delta_delay_model.echo";
         File lookupDumpFile = new File(lookupDumpPath);
         this.buildDelayTables(lookupDumpFile);
 
@@ -972,6 +1265,17 @@ public class Architecture implements Serializable {
 
         ArchitectureException(String message) {
             super(message);
+        }
+    }
+
+    private NodeList xPathQuery(String query){
+        try {
+            XPathExpression expr = this.xPath.compile(query);
+            NodeList result = (NodeList) expr.evaluate(this.xmlDocument, XPathConstants.NODESET);
+            return result;
+        } catch (XPathExpressionException e) {
+            System.out.println(String.format("XPath query: \"%s\" failed.", query));
+            return null;
         }
     }
 }

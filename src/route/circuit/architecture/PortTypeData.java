@@ -29,7 +29,6 @@ public class PortTypeData implements Serializable {
     private List<String> portNames = new ArrayList<>();
     private List<Integer> blockTypeIndexes = new ArrayList<>();
     private List<PortType> portTypes = new ArrayList<>();
-    //private List<Integer> portEnds = new ArrayList<>();
     private List<int[]> portRanges = new ArrayList<>();
     private List<Boolean> portEquivalence = new ArrayList<>();
 

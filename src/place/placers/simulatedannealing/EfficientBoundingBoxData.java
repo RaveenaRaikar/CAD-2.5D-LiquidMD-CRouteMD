@@ -1,5 +1,6 @@
 package place.placers.simulatedannealing;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -12,6 +13,7 @@ class EfficientBoundingBoxData {
     private double weight;
     private GlobalBlock[] blocks;
     private boolean alreadySaved;
+    private int SLLrowCount;
 
     private int min_x;
     private int nb_min_x;
@@ -45,7 +47,6 @@ class EfficientBoundingBoxData {
 
         this.blocks = new GlobalBlock[blockSet.size()];
         blockSet.toArray(this.blocks);
-
         this.setWeightandSize();
 
         this.boundingBox = -1;
@@ -54,9 +55,25 @@ class EfficientBoundingBoxData {
         this.max_x = Integer.MAX_VALUE;
         this.max_y = -1;
 
-        this.calculateBoundingBoxFromScratch();
+        this.calculateBoundingBoxFromScratch(false);
         this.alreadySaved = false;
     }
+    public EfficientBoundingBoxData(GlobalBlock [] SLLDummypair, int SLLrowCount) {
+    	
+    	this.blocks = SLLDummypair;
+    	this.SLLrowCount = SLLrowCount;
+        this.setWeightandSize();
+
+        this.boundingBox = -1;
+        this.min_x = Integer.MAX_VALUE;
+        this.min_y = -1;
+        this.max_x = Integer.MAX_VALUE;
+        this.max_y = -1;
+
+        this.calculateBoundingBoxFromScratch(true);
+        this.alreadySaved = false;
+    }
+
 
 
     public double calculateDeltaCost(GlobalBlock block, AbstractSite newSite) {
@@ -67,7 +84,7 @@ class EfficientBoundingBoxData {
                 || (block.getRow() == this.min_y && this.nb_min_y == 1 && newSite.getRow() > this.min_y)
                 || (block.getRow() == this.max_y && this.nb_max_y == 1 && newSite.getRow() < this.max_y)) {
 
-            calculateBoundingBoxFromScratch(block, newSite);
+            calculateBoundingBoxFromScratch(block, newSite, false);
 
         } else {
             if(newSite.getColumn() < this.min_x) {
@@ -166,11 +183,11 @@ class EfficientBoundingBoxData {
     }
 
 
-    public void calculateBoundingBoxFromScratch()  {
-        this.calculateBoundingBoxFromScratch(null, null);
+    public void calculateBoundingBoxFromScratch(boolean forSLL)  {
+        this.calculateBoundingBoxFromScratch(null, null, forSLL);
     }
 
-    public void calculateBoundingBoxFromScratch(GlobalBlock block, AbstractSite alternativeSite)  {
+    public void calculateBoundingBoxFromScratch(GlobalBlock block, AbstractSite alternativeSite, boolean forSLL)  {
         this.min_x = Integer.MAX_VALUE;
         this.max_x = -1;
         this.min_y = Integer.MAX_VALUE;
@@ -178,12 +195,12 @@ class EfficientBoundingBoxData {
 
         AbstractSite site;
         for(int i = 0; i < this.blocks.length; i++) {
+
             if(this.blocks[i] == block) {
                 site = alternativeSite;
             } else {
                 site = this.blocks[i].getSite();
             }
-
 
             if(site.getColumn() < this.min_x) {
                 this.min_x = site.getColumn();
@@ -214,7 +231,15 @@ class EfficientBoundingBoxData {
             }
         }
 
-        this.boundingBox = (this.max_x - this.min_x + 1) + (this.max_y - this.min_y + 1);
+        if(forSLL) {
+        	this.boundingBox = (this.max_x - this.min_x + 1) + this.SLLrowCount ;
+
+        	
+        }else {
+        	this.boundingBox = (this.max_x - this.min_x + 1) + (this.max_y - this.min_y + 1);
+
+        }
+
     }
 
 

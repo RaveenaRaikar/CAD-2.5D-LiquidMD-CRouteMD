@@ -4,26 +4,33 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+
 import place.circuit.architecture.DelayTables;
+import place.circuit.block.AbstractBlock;
 import place.circuit.block.GlobalBlock;
 import place.circuit.block.LeafBlock;
+import place.circuit.pin.AbstractPin;
+import place.circuit.pin.GlobalPin;
 import place.circuit.pin.LeafPin;
+import place.circuit.timing.TimingNode.Position;
 
 public class TimingNode {
 
-    public enum Position {ROOT, INTERMEDIATE, LEAF};
+    public enum Position {ROOT, INTERMEDIATE, LEAF, SLLNODE};
 
     private LeafBlock block;
     private GlobalBlock globalBlock;
     private LeafPin pin;
-
+    private AbstractPin gpin;
     private Position position;
 
     private final ArrayList<TimingEdge> sourceEdges = new ArrayList<>();
     private final ArrayList<TimingEdge> sinkEdges = new ArrayList<>();
+    private final ArrayList<TimingEdge> SLLsinkEdges = new ArrayList<>();
     private int numSources = 0, numSinks = 0;
 
     private double arrivalTime, requiredTime;
+    private double sllSLack;
 
     //Tarjan's strongly connected components algorithm
     private int index;
@@ -32,7 +39,10 @@ public class TimingNode {
     
     private int clockDomain;
     private double clockDelay;
-
+    private boolean SLLNode = false;
+    private boolean SLLsink = false;
+    private boolean SLLsource = false;
+    
     TimingNode(LeafBlock block, LeafPin pin, Position position, int clockDomain, double clockDelay) {
         this.block = block;
         this.pin = pin;
@@ -44,8 +54,21 @@ public class TimingNode {
         
         this.clockDomain = clockDomain;
         this.clockDelay = clockDelay;
+
     }
-    
+    TimingNode(GlobalBlock block, GlobalPin pin, Position position, int clockDomain, double clockDelay) {
+
+        this.gpin = pin;
+
+        this.globalBlock = (GlobalBlock) block;
+        this.globalBlock.addTimingNode(this);
+
+        this.position = position;
+        
+        this.clockDomain = clockDomain;
+        this.clockDelay = clockDelay;
+        this.SLLNode = true;
+    }
     void compact() {
     	this.sourceEdges.trimToSize();
         this.sinkEdges.trimToSize();
@@ -60,11 +83,20 @@ public class TimingNode {
     public LeafPin getPin() {
         return this.pin;
     }
+    public boolean getSLLnodestatus() {
+    	return this.SLLNode;
+    }
+    public AbstractPin getgPin() {
+        return this.gpin;
+    }
     public Position getPosition() {
         return this.position;
     }
+    
+   
 
     private void addSource(TimingNode source, TimingEdge edge) {
+
         this.sourceEdges.add(edge);
         this.numSources++;
     }
@@ -78,9 +110,20 @@ public class TimingNode {
 
         return edge;
     }
+    TimingEdge addSink(TimingNode sink, double delay, DelayTables delayTables, boolean isSLL) {
+        TimingEdge edge = new TimingEdge(delay, this, sink, delayTables, isSLL);
+
+        this.SLLsinkEdges.add(edge);
+
+
+        sink.addSource(this, edge);
+
+        return edge;
+    }
 
     void removeSource(TimingEdge source){
     	if(this.sourceEdges.contains(source)){
+
     		this.sourceEdges.remove(source);
     		this.numSources--;
     	}else{
@@ -117,6 +160,21 @@ public class TimingNode {
         return this.sinkEdges.get(sinkIndex);
     }
 
+    void setSLLNodeasSink() {
+		this.SLLsink = true;
+		this.SLLsource = false;
+    }
+    void setSLLNodeasSource() {
+		this.SLLsink = false;
+		this.SLLsource = true;
+    }
+    
+    boolean isSLLsink() {
+    	return this.SLLsink;
+    }
+    boolean isSLLsource() {
+    	return this.SLLsource;
+    }
     //Arrival time	
     void setArrivalTime(double value) {
     	this.arrivalTime = value;
@@ -124,20 +182,28 @@ public class TimingNode {
     double getArrivalTime() {
     	return this.arrivalTime;
     }
+    
+
+    ///IF the edge source is an SLL node
     void updateArrivalTime() {
 		this.arrivalTime = Double.MIN_VALUE;
 		for(TimingEdge edge:this.sourceEdges) {
+			//
 			double localArrivalTime = edge.getSource().arrivalTime + edge.getTotalDelay();
+
 			if(localArrivalTime > this.arrivalTime) {
 				this.arrivalTime = localArrivalTime;
 			}
 		}
+
 	}
+
 	void recursiveArrivalTraversal(List<TimingNode> traversal, Set<Integer> added) {
 		if(this.position.equals(Position.ROOT)) return;
 		
 		for(TimingEdge edge:this.sourceEdges) {
 			if(!added.contains(edge.getSource().index)) {
+
 				edge.getSource().recursiveArrivalTraversal(traversal, added);
 			}
 		}
@@ -154,6 +220,20 @@ public class TimingNode {
     }
     void updateRequiredTime() {
 		this.requiredTime = Double.MAX_VALUE;
+		
+
+
+		for(TimingEdge edge:this.sinkEdges) {
+			double localRequiredTime = edge.getSink().requiredTime - edge.getTotalDelay();
+
+			if(localRequiredTime < this.requiredTime) {
+				this.requiredTime = localRequiredTime;
+			}
+		}
+    }
+    
+    void updateRequiredTimeSetCriticalEdge() {
+		this.requiredTime = Double.MAX_VALUE;
 		for(TimingEdge edge:this.sinkEdges) {
 			double localRequiredTime = edge.getSink().requiredTime - edge.getTotalDelay();
 			if(localRequiredTime < this.requiredTime) {
@@ -161,6 +241,23 @@ public class TimingNode {
 			}
 		}
     }
+    void setSLLslack(double slack) {
+    	this.sllSLack = slack;
+    }
+    void updateSLLRequiredTime() {
+		this.requiredTime = Double.MAX_VALUE;
+		
+
+		for(TimingEdge edge:this.SLLsinkEdges) {
+			double localRequiredTime = edge.getSink().requiredTime - edge.getTotalDelay();
+
+			if(localRequiredTime < this.requiredTime) {
+				this.requiredTime = localRequiredTime;
+			}
+		}
+    }
+    
+    
 	void recursiveRequiredTraversal(List<TimingNode> traversal, Set<Integer> added) {
 		if(this.position.equals(Position.LEAF)) return;
 		
@@ -266,6 +363,12 @@ public class TimingNode {
 
     @Override
     public String toString() {
-        return this.pin.toString();
+    	if(!this.SLLNode) {
+    		return this.pin.toString();
+    	}else
+    	{
+    		return this.gpin.toString();
+    	}
     }
+
 }

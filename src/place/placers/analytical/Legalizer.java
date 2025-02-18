@@ -20,7 +20,6 @@ import place.visual.PlacementVisualizer;
 abstract class Legalizer {
     protected Circuit circuit;
     protected int width, height;
-
     private List<BlockType> blockTypes;
     private List<Integer> blockTypeIndexStarts;
 
@@ -125,19 +124,21 @@ abstract class Legalizer {
     	this(circuit, blockTypes, blockTypeIndexStarts, numIterations, linearX, linearY, legalX, legalY, heights, leafNode, visualizer, netBlocks, logger);
 
     	try {
+
     		this.initializeHardblockLegalizer(nets);
     	} catch (OffsetException error) {
     		this.logger.raise("Offset problem in hardblock connection legalizer", error);
     	}
     }
     private void initializeHardblockLegalizer(List<Net> nets) throws OffsetException{
+
         this.hardblockLegalizer = new HardblockConnectionLegalizer(this.circuit, this.linearX, this.linearY, this.legalX, this.legalY, this.heights, this.width, this.height, nets, this.logger);
         for(int i = 0; i < this.blockTypes.size(); i++) {
             BlockType hardblockType = this.blockTypes.get(i);
-            if(hardblockType.getCategory().equals(BlockCategory.HARDBLOCK) || hardblockType.getCategory().equals(BlockCategory.IO)){
+            if(hardblockType.getCategory().equals(BlockCategory.HARDBLOCK) || hardblockType.getCategory().equals(BlockCategory.IO) || hardblockType.getCategory().equals(BlockCategory.SLLDUMMY)){
             	int blocksStart = this.blockTypeIndexStarts.get(i);
                 int blocksEnd = this.blockTypeIndexStarts.get(i + 1);
-
+ 
                 if(blocksEnd > blocksStart) {
                 	this.hardblockLegalizer.addBlocktype(hardblockType, blocksStart, blocksEnd);
                 }
@@ -188,7 +189,8 @@ abstract class Legalizer {
     	long startTime = System.nanoTime();
 
     	this.isLastIteration = isLastIteration;
-        for(int i = 0; i < this.blockTypes.size(); i++) {
+
+        for(int i = 0; i < this.blockTypes.size(); i++) {	
         	if(this.blockTypes.get(i).equals(legalizeType)){
         		try {
         			this.legalizeBlockType(i);
@@ -212,7 +214,8 @@ abstract class Legalizer {
 
         int blocksStart = this.blockTypeIndexStarts.get(i);
         int blocksEnd = this.blockTypeIndexStarts.get(i + 1);
-
+               
+        //For first iteration => the value of blockstart and block end is the starting point of movable blocks
         if(blocksEnd > blocksStart) {
             this.blockCategory = this.blockType.getCategory();
 
@@ -224,9 +227,12 @@ abstract class Legalizer {
             }
 
             if(this.blockType.getCategory().equals(BlockCategory.CLB)){
+
             	this.legalizeBlockType(blocksStart, blocksEnd);
         	}else if(this.blockType.getCategory().equals(BlockCategory.HARDBLOCK)){
         		this.hardblockLegalizer.legalizeHardblock(this.blockType, this.legalizerSettings.get("anneal_quality").getValue());
+        	}else if(this.blockType.getCategory().equals(BlockCategory.SLLDUMMY)){
+        		this.fixSLLPositions(blocksStart, blocksEnd);
         	}else if(this.blockType.getCategory().equals(BlockCategory.IO)){
         		this.hardblockLegalizer.legalizeIO(this.blockType, this.legalizerSettings.get("anneal_quality").getValue());
         		for(int b = blocksStart; b < blocksEnd; b++){
@@ -234,17 +240,30 @@ abstract class Legalizer {
         			this.linearY[b] = this.legalY[b];
         		}
         	}else{
+        		
         		throw new BlockTypeException();
         	}
         }
     }
 
+    protected void fixSLLPositions(int blocksStart, int blocksEnd) {
+    	int column, row = 0;
+        for(int index = blocksStart; index < blocksEnd; index++) {
+            double x = this.linearX[index],
+                   y = this.linearY[index];
+            column = (int) Math.round(x);
+            row = (int) Math.round(y);
+            this.legalX[index] = column;
+            this.legalY[index] = row;
+        }
+    }
     protected void addVisual(String name, double[] coorX, double[] coorY){
     	this.visualizer.addPlacement(name, this.netBlocks, coorX, coorY, -1);
     }
 
     public void printLegalizationRuntime(){
     	this.logger.println();
+    
     	this.logger.println("-------------------------------");
     	this.logger.println("---- LEGALIZATION RUNTIME -----");
     	this.logger.println("-------------------------------");

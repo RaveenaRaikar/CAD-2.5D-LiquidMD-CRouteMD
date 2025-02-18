@@ -18,6 +18,7 @@ import place.circuit.block.GlobalBlock;
 import place.circuit.block.LeafBlock;
 import place.circuit.exceptions.PlacementException;
 import place.circuit.pin.AbstractPin;
+import place.circuit.pin.GlobalPin;
 import place.circuit.pin.LeafPin;
 import place.circuit.timing.TimingNode.Position;
 import place.placers.simulatedannealing.Swap;
@@ -36,13 +37,16 @@ public class TimingGraph {
     private int virtualIoClockDomain;
 
     private List<TimingNode> timingNodes = new ArrayList<>();
-    private List<TimingNode> rootNodes, leafNodes;
+    
+    private List<Double> clockDelays = new ArrayList<>();
+    private List<TimingNode> rootNodes, leafNodes, interNodes;
     private List<TimingNode> arrivalTraversal, requiredTraversal;
     
     private List<TimingNode> affectedNodes = new ArrayList<>();
 
     private List<TimingEdge> timingEdges = new ArrayList<>();
     private List<TimingEdge> globalTimingEdges;
+
     
     private List<List<TimingEdge>> timingNets = new ArrayList<>();
 
@@ -82,16 +86,18 @@ public class TimingGraph {
         this.buildTraversals();
         
         this.setGlobalTimingEdges();
+        
+        
+        
     }
 
     private void buildGraph() {
-
+    	long start = System.nanoTime();
         List<Double> clockDelays = new ArrayList<Double>();
 
         // Create all timing nodes
         for(BlockType leafBlockType : BlockType.getLeafBlockTypes()) {
             boolean isClocked = leafBlockType.isClocked();
-
             for(AbstractBlock abstractBlock : this.circuit.getBlocks(leafBlockType)) {
                 LeafBlock block = (LeafBlock) abstractBlock;
                 boolean isConstantGenerator = isClocked ? false : this.isConstantGenerator(block);
@@ -116,11 +122,13 @@ public class TimingGraph {
                 if(isClocked) {
                     for(AbstractPin abstractPin : block.getInputPins()) {
                         if(abstractPin.getSource() != null) {
+
                             LeafPin inputPin = (LeafPin) abstractPin;
                             TimingNode node = new TimingNode(block, inputPin, Position.LEAF, clockDomain, clockDelay);
                             inputPin.setTimingNode(node);
 
                             clockDelays.add(0.0);
+                            this.clockDelays.add(0.0);
                             this.timingNodes.add(node);
                         }
                     }
@@ -140,25 +148,83 @@ public class TimingGraph {
 
                         if(position == Position.ROOT) {
                             clockDelays.add(clockDelay + outputPin.getPortType().getSetupTime());
+                            this.clockDelays.add(clockDelay + outputPin.getPortType().getSetupTime());
                         } else {
                             clockDelays.add(0.0);
+                            this.clockDelays.add(0.0);
+
                         }
+                        
                     }
                 }
             }
         }
+        
+        
+        for(BlockType SLLblocktype : BlockType.getDummyBlockTypes()) {
+        	
+        	for(AbstractBlock abstractBlock : this.circuit.getBlocks(SLLblocktype)) {
 
+        		GlobalBlock block = (GlobalBlock) abstractBlock;
+                double clockDelay = 0;
+                int clockDomain = -1;
+        		if(block.isSLLSink()) {
+
+        			for(AbstractPin abstractPin : abstractBlock.getInputPins()) {
+        				
+        				if(abstractPin.getPortName().equals("datain") && (abstractPin.getIndex()==0)) {
+
+        					GlobalPin inputPin = (GlobalPin) abstractPin ;
+
+        					TimingNode node = new TimingNode(block, inputPin, Position.SLLNODE, clockDomain, clockDelay);
+        					inputPin.setTimingNode(node);
+        					clockDelays.add(0.0);
+        					node.setSLLNodeasSink();
+        					this.timingNodes.add(node);
+
+        				}
+        			}
+        		}else if(block.isSLLSource()) {
+        			for(AbstractPin abstractPin : block.getOutputPins()) {
+                    	GlobalPin outputPin = (GlobalPin) abstractPin;
+                    	
+                        if(outputPin.getNumSinks() > 0){
+                            TimingNode node = new TimingNode(block, outputPin, Position.SLLNODE, clockDomain, clockDelay);
+                            abstractPin.setTimingNode(node);
+                            node.setSLLNodeasSource();
+                            this.timingNodes.add(node);
+                            clockDelays.add(0.0);
+                        }
+        			}
+        		}
+        	}
+        }
+
+        
+
+        
         int numNodes = this.timingNodes.size();
         for(int i = 0; i < numNodes; i++) {
             TimingNode node = this.timingNodes.get(i);
-            if(node.getPosition() != Position.LEAF && !this.clockNamesToDomains.containsKey(node.getPin().getOwner().getName())) {
-                this.traverseFromSource(node, clockDelays.get(i));
-            }
+
+            if(!(node.getSLLnodestatus())) { //Not required for dummy blocks as they are at the highest level already
+            	if(node.getPosition() != Position.LEAF && !this.clockNamesToDomains.containsKey(node.getPin().getOwner().getName())) {
+
+            		this.traverseFromSource(node, clockDelays.get(i));
+            	}
+           }else
+           {
+
+        	   this.AddSLLTimingEdges(node, clockDelays.get(i));
+           }
+
         }
         
         for(TimingNode node : this.timingNodes) {
             node.compact();
         }
+        
+        System.out.printf("Building graph took %.2fs\n\n", (System.nanoTime() - start) * 1e-9);
     }
 
     private boolean isConstantGenerator(LeafBlock block) {
@@ -170,6 +236,7 @@ public class TimingGraph {
 
         return true;
     }
+
 
     private Pair<Integer, Double> getClockDomainAndDelay(LeafBlock block) {
         /**
@@ -211,12 +278,120 @@ public class TimingGraph {
 
         return new Pair<Integer, Double>(this.clockNamesToDomains.get(clockName), clockDelay);
     }
+  
 
+
+    //The problem occurs because it is trying to get the global parent.
     private void traverseFromSource(TimingNode pathSourceNode, double clockDelay) {
+    	GlobalBlock pathSourceBlock = pathSourceNode.getGlobalBlock();
+    	LeafPin pathSourcePin = pathSourceNode.getPin();
+        Map<GlobalBlock, List<TimingEdge>> sourceTimingNets = new HashMap<>();
+        
+        //System.out.print("\nThe pathsourcepin is " + pathSourcePin);
 
-        GlobalBlock pathSourceBlock = pathSourceNode.getGlobalBlock();
-        LeafPin pathSourcePin = pathSourceNode.getPin();
+        Stack<TraversePair> todo = new Stack<>();
+        todo.push(new TraversePair(pathSourcePin, clockDelay));
 
+        while(!todo.empty()) {
+            TraversePair traverseEntry = todo.pop();
+            AbstractPin sourcePin = traverseEntry.pin;
+            //System.out.print("\nThe sourcePin is " + sourcePin);
+            double delay = traverseEntry.delay;
+
+            AbstractBlock sourceBlock = sourcePin.getOwner();
+            PortType sourcePortType = sourcePin.getPortType();
+            if(this.isEndpin(sourceBlock, sourcePin, pathSourcePin)) {
+                delay += sourcePortType.getSetupTime();
+                TimingNode pathSinkNode = ((LeafPin) sourcePin).getTimingNode();
+               // System.out.print("\nThis is true for the last pin " +sourceBlock.getName()+" " +  sourcePin + " the timing node is "+ pathSinkNode.toString());
+                //System.out.print("\nThe delay added here is " + delay);
+                // If pathSinkNode is null, this sinkPin doesn't have any sinks
+                // so isn't used in the timing graph
+                
+                if(pathSinkNode != null) {
+                    TimingEdge edge = pathSourceNode.addSink(pathSinkNode, delay, this.delayTables);
+                    //System.out.print("\nThe path source node is " + pathSourceNode.toString() + " and the path sink node is " + pathSinkNode.toString() );
+                    this.timingEdges.add(edge);
+                    GlobalBlock pathSinkBlock = pathSinkNode.getGlobalBlock();
+                    if(pathSinkBlock != pathSourceBlock) {
+                        if(!sourceTimingNets.containsKey(pathSinkBlock)) {
+                            sourceTimingNets.put(pathSinkBlock, new ArrayList<TimingEdge>());
+                        }
+                        sourceTimingNets.get(pathSinkBlock).add(edge);
+                    }
+                }
+
+            } else if(this.isSLLEndpin(sourceBlock, sourcePin, pathSourcePin)) { 
+            	//The dummy blocks dont have internal hierarchy and internal delay
+            	GlobalBlock ParentBlock = (GlobalBlock) sourceBlock;
+            	GlobalPin ParentPin = (GlobalPin) sourcePin;
+            	int clockDomain = -1;
+				
+                 TimingNode pathSinkNode = ParentPin.getTimingNode();
+
+                 if(pathSinkNode != null) {
+                     TimingEdge edge = pathSourceNode.addSink(pathSinkNode, delay, this.delayTables);
+                     this.timingEdges.add(edge);
+                     GlobalBlock pathSinkBlock = pathSinkNode.getGlobalBlock();
+                     if(pathSinkBlock != pathSourceBlock) {
+                         if(!sourceTimingNets.containsKey(pathSinkBlock)) {
+                             sourceTimingNets.put(pathSinkBlock, new ArrayList<TimingEdge>());
+                         }
+         
+                         sourceTimingNets.get(pathSinkBlock).add(edge);
+                     }
+                 }
+
+            }else {
+            	
+                List<AbstractPin> sinkPins;
+                if(sourceBlock.isLeaf() && sourcePin != pathSourcePin) {
+                    sinkPins = sourceBlock.getOutputPins();
+                }else {
+                		sinkPins = sourcePin.getSinks();
+                }
+
+                for(AbstractPin sinkPin : sinkPins) {
+                	if(sinkPin != null) {
+                    	if(sinkPin.getOwner().isSLLDummy()) {
+                    		GlobalPin sinkSllPin = (GlobalPin) sinkPin;
+                    		double sourceSinkDelay = sourcePortType.getDelay(sinkSllPin.getPortType());
+                            
+                            if(sourceSinkDelay >= 0.0){ // Only consider existing connections
+                                double totalDelay = delay + sourceSinkDelay;
+                                    todo.push(new TraversePair(sinkSllPin, totalDelay));
+                            }
+                    	}else {
+                            double sourceSinkDelay = sourcePortType.getDelay(sinkPin.getPortType());
+                            
+                            if(sourceSinkDelay >= 0.0){ // Only consider existing connections
+                                double totalDelay = delay + sourceSinkDelay;
+
+                                // Loops around an unclocked block are rare, but not inexistent.
+                                // The proper way to handle these is probably to add the loop
+                                // delay to all other output pins of this block.
+                                if(sinkPin != pathSourcePin) {
+                                    todo.push(new TraversePair(sinkPin, totalDelay));
+                                }
+                                    
+                            }
+                        }                    	
+                	}
+            	}
+            }
+     
+
+        }
+
+        for(List<TimingEdge> timingNet : sourceTimingNets.values()) {
+            this.timingNets.add(timingNet);
+        }
+    }
+
+    //The problem occurs because it is trying to get the global parent.
+    private void AddSLLTimingEdges(TimingNode pathSourceNode, double clockDelay) {
+    	GlobalBlock pathSourceBlock = pathSourceNode.getGlobalBlock();
+    	AbstractPin pathSourcePin = pathSourceNode.getgPin();
         Map<GlobalBlock, List<TimingEdge>> sourceTimingNets = new HashMap<>();
 
         Stack<TraversePair> todo = new Stack<>();
@@ -229,17 +404,15 @@ public class TimingGraph {
 
             AbstractBlock sourceBlock = sourcePin.getOwner();
             PortType sourcePortType = sourcePin.getPortType();
-
+            
             if(this.isEndpin(sourceBlock, sourcePin, pathSourcePin)) {
                 delay += sourcePortType.getSetupTime();
                 TimingNode pathSinkNode = ((LeafPin) sourcePin).getTimingNode();
-
                 // If pathSinkNode is null, this sinkPin doesn't have any sinks
                 // so isn't used in the timing graph
                 if(pathSinkNode != null) {
                     TimingEdge edge = pathSourceNode.addSink(pathSinkNode, delay, this.delayTables);
                     this.timingEdges.add(edge);
-
                     GlobalBlock pathSinkBlock = pathSinkNode.getGlobalBlock();
                     if(pathSinkBlock != pathSourceBlock) {
                         if(!sourceTimingNets.containsKey(pathSinkBlock)) {
@@ -280,9 +453,12 @@ public class TimingGraph {
             this.timingNets.add(timingNet);
         }
     }
-
     private boolean isEndpin(AbstractBlock block, AbstractPin pin, AbstractPin pathSourcePin) {
         return block.isLeaf() && (pin != pathSourcePin) && (block.isClocked() && pin.isInput() || pin.isOutput());
+    }
+    
+    private boolean isSLLEndpin(AbstractBlock block, AbstractPin pin, AbstractPin pathSourcePin) {
+        return block.isSLLDummy() && (pin != pathSourcePin) && (pin.isInput() || pin.isOutput());
     }
 
     private class TraversePair {
@@ -298,12 +474,18 @@ public class TimingGraph {
     private void setRootAndLeafNodes(){
     	this.rootNodes = new ArrayList<>();
     	this.leafNodes = new ArrayList<>();
+    	this.interNodes = new ArrayList<>();
     	
         for(TimingNode timingNode:this.timingNodes){
         	if(timingNode.getPosition().equals(Position.ROOT)){
+
         		this.rootNodes.add(timingNode);
         	}else if(timingNode.getPosition().equals(Position.LEAF)){
+
         		this.leafNodes.add(timingNode);
+        	}else if(timingNode.getPosition().equals(Position.SLLNODE)){
+
+        		this.interNodes.add(timingNode);        		
         	}
         }
     }
@@ -320,8 +502,21 @@ public class TimingGraph {
     	}
 
     	added.clear();
+    	for(TimingNode interNodes : this.interNodes) {
+
+    		interNodes.recursiveArrivalTraversal(this.arrivalTraversal, added);
+
+    		
+    	}
+
+    	added.clear();
     	for(TimingNode rootNode : this.rootNodes) {
+
     		rootNode.recursiveRequiredTraversal(this.requiredTraversal, added);
+    	}
+    	added.clear();
+    	for(TimingNode interNodes : this.interNodes) {
+    		interNodes.recursiveRequiredTraversal(this.requiredTraversal, added);
     	}
     	System.out.printf("Build traversals took %.2fs\n\n", (System.nanoTime() - start) * 1e-9);
     }
@@ -334,6 +529,32 @@ public class TimingGraph {
     	}
     }
 
+   
+    public List<TimingNode> getTimingNodes() {
+    	return this.timingNodes;
+    }
+    
+    public List<List<TimingEdge>> getTimingNets() {
+    	return this.timingNets;
+    }
+    
+    public List<TimingNode> getArrivalTraversal(){
+    	return this.arrivalTraversal;
+    }
+    public List<TimingNode> getRequiredTraversal(){
+    	return this.requiredTraversal;
+    }
+    public List<Double> getClockDelays(){
+    	return this.clockDelays;
+    }
+    
+    public List<TimingEdge> getTimingEdges(){
+    	return this.timingEdges;
+    }
+    
+    public List<TimingEdge> getGlobalTimingEdges(){
+    	return this.globalTimingEdges;
+    }
     /****************************************************
      * Functionality to find combinational loops with   *
      * Tarjan's strongly connected components algorithm *
@@ -342,7 +563,7 @@ public class TimingGraph {
 
     	long start = System.nanoTime();
 
-    	System.out.println("Cut combinational loops iteratively");
+    	System.out.println("\nCut combinational loops iteratively");
 
     	int iteration = 0;
     	boolean finalIteration = false;
@@ -471,24 +692,37 @@ public class TimingGraph {
         return this.maxDelay;
     }
     public void calculateCriticalities(boolean calculateWireDelays) {
+    	
         if(calculateWireDelays) {
             this.calculateWireDelays();
         }
 
         this.calculateArrivalTimesAndCriticalities(true);
     }
+    public void calculateCriticalities(boolean calculateWireDelays, double sysMaxDelay) {
+        if(calculateWireDelays) {
+            this.calculateWireDelays();
+        }
 
+        this.calculateArrivalTimesAndCriticalities(true, sysMaxDelay);
+    }
+ 
+    //private void calculateArrivalTimesAndCriticalities(boolean calculateCriticalities, boolean firstUpdate) {
     private void calculateArrivalTimesAndCriticalities(boolean calculateCriticalities) {
         //GLOBAL MAX DELAY
     	this.maxDelay = 0;
-
     	//ARRIVAL TIME
         for(TimingNode rootNode: this.rootNodes){
         	rootNode.setArrivalTime(0);
         }
+
         for(TimingNode node : this.arrivalTraversal) {
-        	node.updateArrivalTime();
+        	if(!node.isSLLsource()) {
+        		node.updateArrivalTime();
+        	}
         }
+        
+        
         for(TimingNode leafNode: this.leafNodes){
         	this.maxDelay = Math.max(this.maxDelay, (leafNode.getArrivalTime() - leafNode.getClockDelay()));
         }
@@ -499,13 +733,20 @@ public class TimingGraph {
         		leafNode.setRequiredTime(this.maxDelay + leafNode.getClockDelay());
         	}
             for(TimingNode node: this.requiredTraversal) {
-            	node.updateRequiredTime();
+            	if(!node.isSLLsink()) {
+            		node.updateRequiredTime();
+            	}
             }
             for(TimingEdge edge:this.globalTimingEdges){
-            	double slack = edge.getSink().getRequiredTime() - edge.getSource().getArrivalTime() - edge.getTotalDelay();
-            	slack = Math.min(slack,	this.maxDelay);
-            	slack = Math.max(slack,	0);
+            	double slack = 0;
+            	if(edge.getSource().getSLLnodestatus()) {
+            		slack = edge.getSink().getRequiredTime() - edge.getSource().getArrivalTime() - edge.getTotalDelay() - (this.circuit.getArchitecture().sllDelay);
+            	}else {
+            		slack = edge.getSink().getRequiredTime() - edge.getSource().getArrivalTime() - edge.getTotalDelay();
+            	}
             	
+        		slack = Math.min(slack,	this.maxDelay);
+        		slack = Math.max(slack,	0);
                 double val = (1 - slack/this.maxDelay) * 20;
                 int i = Math.min(19, (int) val);
                 double linearInterpolation = val - i;
@@ -514,6 +755,58 @@ public class TimingGraph {
                         (1 - linearInterpolation) * this.criticalityLookupTable[i]
                         + linearInterpolation * this.criticalityLookupTable[i+1]);
             }
+        }
+    }
+    private void calculateArrivalTimesAndCriticalities(boolean calculateCriticalities, double maxSysDelay) {
+        //GLOBAL MAX DELAY
+    	this.maxDelay = 0;
+    	//ARRIVAL TIME
+        for(TimingNode rootNode: this.rootNodes){
+        	rootNode.setArrivalTime(0);
+        }
+
+        for(TimingNode node : this.arrivalTraversal) {
+
+        	if(!node.isSLLsource()) {
+        		node.updateArrivalTime();        		
+        	}
+        }
+        
+        
+        for(TimingNode leafNode: this.leafNodes){        	
+        	this.maxDelay = Math.max(this.maxDelay, (leafNode.getArrivalTime() - leafNode.getClockDelay()));
+//        	this.maxDelay = Math.max(this.maxDelay, maxSysDelay);
+        }
+        if(calculateCriticalities) {
+        	//REQUIRED TIME
+        	for(TimingNode leafNode: this.leafNodes) {
+        		leafNode.setRequiredTime(this.maxDelay + leafNode.getClockDelay());
+        		
+        		
+        	}
+            for(TimingNode node: this.requiredTraversal) {
+            	if(!node.isSLLsink()) {
+            		node.updateRequiredTime();
+            	}
+            }
+            for(TimingEdge edge:this.globalTimingEdges){
+            	double slack = 0;
+            	slack = edge.getSink().getRequiredTime() - edge.getSource().getArrivalTime() - edge.getTotalDelay();
+
+
+        		slack = Math.min(slack,	this.maxDelay);
+        		slack = Math.max(slack,	0);
+
+                double val = (1 - slack/this.maxDelay) * 20;
+                int i = Math.min(19, (int) val);
+                double linearInterpolation = val - i;
+
+                edge.setCriticality(
+                        (1 - linearInterpolation) * this.criticalityLookupTable[i]
+                        + linearInterpolation * this.criticalityLookupTable[i+1]);
+                
+            }
+
         }
     }
 
@@ -570,10 +863,7 @@ public class TimingGraph {
 				}else{
 					sourceNode = edge.getSource();
 					System.out.println("Warning: more than one source node on the critical path");
-					//System.out.println("\tsinkNode: " + sinkNode.toString());
-					//System.out.println("\tsourceNode1: " + sourceNode.toString());
-					//System.out.println("\tsourceNode2: " + edge.getSource().toString());
-					//System.out.println();
+	
 				}
 			}
 		}
@@ -599,19 +889,25 @@ public class TimingGraph {
     	double totalCost = 0;
 
     	for(List<TimingEdge> net : this.timingNets) {
+    		
     		double netCost = 0;
     		for(TimingEdge edge : net) {
-    			double cost = edge.getCost();
+    			
+    			double cost = edge.getActualCost();
+
     			if(cost > netCost) {
     				netCost = cost;
     			}
     		}
  
     		totalCost += netCost;
-    	}
 
+    	}
+    	
     	return totalCost;
     }
+    
+  
 
     public double calculateDeltaCost(Swap swap) {
     	double cost = 0;
@@ -670,5 +966,17 @@ public class TimingGraph {
 
     public void revert() {
     	// Do nothing
+    }
+    
+    
+    /******************This is to print all the arrival and required times ***********/
+    public void printTimingInfo() {
+		System.out.print("\n");
+		System.out.print("Timing Node \t Arrival time \t Required time");
+    	for(TimingNode timingNode:this.timingNodes){
+    		System.out.print("\n");
+    		System.out.print(timingNode + "\t" + timingNode.getArrivalTime() + "\t" + timingNode.getRequiredTime());
+    		
+    	}
     }
 }

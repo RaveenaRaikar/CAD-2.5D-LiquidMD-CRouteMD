@@ -4,6 +4,8 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
+import pack.util.Output;
+
 
 public class BlockType implements Serializable, Comparable<BlockType> {
 
@@ -29,16 +31,25 @@ public class BlockType implements Serializable, Comparable<BlockType> {
         types.addAll(BlockType.getBlockTypes(BlockCategory.IO));
         types.addAll(BlockType.getBlockTypes(BlockCategory.CLB));
         types.addAll(BlockType.getBlockTypes(BlockCategory.HARDBLOCK));
-
+        types.addAll(BlockType.getBlockTypes(BlockCategory.SLLDUMMY));
+        types.addAll(BlockType.getBlockTypes(BlockCategory.EMPTY));
         return types;
     }
+
     public static List<BlockType> getLeafBlockTypes() {
         return BlockType.getBlockTypes(BlockCategory.LEAF);
     }
 
+    public static List<BlockType> getDummyBlockTypes() {
+        return BlockType.getBlockTypes(BlockCategory.SLLDUMMY);
+    }
+    public static List<BlockType> getALBSLLBlockTypes() {
+        return BlockType.getBlockTypes(BlockCategory.CLB);
+    }
     public static List<BlockType> getBlockTypes(BlockCategory category) {
         return BlockTypeData.getInstance().getBlockTypes(category);
     }
+
 
 
     private Integer typeIndex, modeIndex;
@@ -66,6 +77,11 @@ public class BlockType implements Serializable, Comparable<BlockType> {
     int getTypeIndex() {
         return this.typeIndex;
     }
+    //to reset for next die
+    public void resetIndex() {
+       this.typeIndex = 0;
+       this.modeIndex = 0;
+    }
     int getModeIndex() {
         return this.modeIndex;
     }
@@ -76,11 +92,23 @@ public class BlockType implements Serializable, Comparable<BlockType> {
     public BlockCategory getCategory() {
         return BlockTypeData.getInstance().getCategory(this.typeIndex);
     }
+    public BlockCategory setCategory() {
+    	System.out.print("\nType index is " + this.typeIndex);
+        return BlockTypeData.getInstance().setCategory(this.typeIndex);
+    }
+    public BlockCategory setCategory(int typeindex) {
+    	System.out.print("\nType index is " + typeindex);
+        return BlockTypeData.getInstance().setCategory(typeindex);
+    }
+    
     public boolean isGlobal() {
         return BlockTypeData.getInstance().isGlobal(this.typeIndex);
     }
     public boolean isLeaf() {
         return BlockTypeData.getInstance().isLeaf(this.typeIndex);
+    }
+    public boolean isSLLDummy() {
+        return BlockTypeData.getInstance().isSLLDummy(this.typeIndex);
     }
 
     public int getHeight() {

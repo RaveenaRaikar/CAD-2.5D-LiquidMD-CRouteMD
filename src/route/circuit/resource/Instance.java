@@ -32,6 +32,7 @@ public class Instance {
 		this.block = block;
 	}
 	
+
 	public boolean containsSource(String portName) {
 		return this.sources.containsKey(portName);
 	}

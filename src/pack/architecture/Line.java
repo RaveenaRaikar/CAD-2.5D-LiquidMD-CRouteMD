@@ -24,8 +24,6 @@ public class Line {
 		line = line.replace("<", "");
 		line = line.replace("/>", "");
 		line = line.replace(">", "");
-		//line = line.replace("/direct","");
-		//Raav: The xml file had an issue. MAke the changes in the xml file.
 		boolean cut = true;
 		char[] array = line.toCharArray();
 		StringBuilder sb = new StringBuilder();
@@ -53,17 +51,10 @@ public class Line {
 		this.properties = new HashMap<String, String>();
 		String[] words = line.split("@");
 		this.type = words[0];
-		//Output.println("The word length is " + words.length);
-		//Output.println("The line is " + line);
-		//Output.println("The word is " + words[0]);
 		for(int i=1; i<words.length; i++){
 			String[] parts = words[i].split("=");
-			//System.out.println("Length of the line " + parts.length +" " + "and the line is " + this.originalLine);
-		//	System.out.println("The part is " + parts.length);
 			if(parts.length != 2){
-			//	int currentLine = new Throwable().getStackTrace()[0].getLineNumber();
-		   //     System.out.println("The Current Line Number is " + currentLine);
-				
+
 				ErrorLog.print("The number of parts is equal to " + parts.length + " | " + words[i] + " | " + this.originalLine);
 
 			}

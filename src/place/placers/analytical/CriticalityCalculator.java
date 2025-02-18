@@ -9,14 +9,17 @@ import place.circuit.architecture.BlockCategory;
 import place.circuit.architecture.DelayTables;
 import place.circuit.block.GlobalBlock;
 import place.circuit.timing.TimingGraph;
+import place.circuit.timing.TimingGraphSLL;
 import place.placers.analytical.AnalyticalAndGradientPlacer.NetBlock;
 import place.placers.analytical.AnalyticalAndGradientPlacer.TimingNet;
 import place.placers.analytical.AnalyticalAndGradientPlacer.TimingNetBlock;
 
 class CriticalityCalculator{
+
     private TimingGraph timingGraph;
     private DelayTables delayTables;
     private BlockCategory[] blockCategories;
+    private double MaxSysDelay = 0;
 
     private List<TimingNet> nets;
 
@@ -39,8 +42,15 @@ class CriticalityCalculator{
         this.nets = nets;
     }
 
+    public double calculate(double[] x, double[] y, double MaxSysDelay) {
+        this.updateDelays(x, y);
+        this.timingGraph.calculateCriticalities(false, MaxSysDelay);
+        
+        return this.timingGraph.getMaxDelay();
+    }
     public double calculate(double[] x, double[] y) {
         this.updateDelays(x, y);
+
         this.timingGraph.calculateCriticalities(false);
         
         return this.timingGraph.getMaxDelay();

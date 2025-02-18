@@ -44,7 +44,6 @@ public class HierarchyParser {
             	this.leafNodes.add(this.currentNode);
             }else{
             	String name = this.getBlockname(line);
-
             	GlobalBlock block = this.nameToGlobalblockMap.remove(name);
             	this.currentNode.add(block);
             	block.setLeafNode(this.currentNode);

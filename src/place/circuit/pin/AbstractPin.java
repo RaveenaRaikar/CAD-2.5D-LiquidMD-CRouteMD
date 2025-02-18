@@ -41,6 +41,7 @@ public abstract class AbstractPin {
     public PortType getPortType() {
         return this.portType;
     }
+
     public String getPortName() {
         return this.portType.getName();
     }
@@ -60,14 +61,16 @@ public abstract class AbstractPin {
     }
 
 
-
     public AbstractPin getSource() {
         return this.source;
     }
     public void setSource(AbstractPin source) {
         this.source = source;
     }
-
+    public void removeSource() {
+        this.source = null;
+    }
+  
     public int getNumSinks() {
         return this.numSinks;
     }
@@ -110,6 +113,12 @@ public abstract class AbstractPin {
 
         this.numSinks++;
     }
+    
+    public void removeSink(AbstractPin sink) {
+    	this.sinks.remove(sink);
+        this.numSinks--;
+    }
+    
 
     public void compact() {
         if(this.numSinks > 1) {
@@ -122,4 +131,10 @@ public abstract class AbstractPin {
     public String toString() {
         return this.owner.toString() + "." + this.portType.getName() + "[" + this.index + "]";
     }
+
+	public AbstractPin getSLLSource() {
+		return (AbstractPin) this.source;
+	}
+
+
 }

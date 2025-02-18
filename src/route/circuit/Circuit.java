@@ -11,6 +11,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import route.circuit.architecture.Architecture;
 import route.circuit.architecture.BlockCategory;
@@ -20,7 +22,9 @@ import route.circuit.block.GlobalBlock;
 import route.circuit.pin.AbstractPin;
 import route.circuit.pin.GlobalPin;
 import route.circuit.resource.ResourceGraph;
+import route.circuit.resource.RouteNode;
 import route.circuit.timing.TimingGraph;
+import route.circuit.timing.TimingNode;
 import route.route.Connection;
 import route.route.Net;
 
@@ -30,7 +34,6 @@ public class Circuit {
 
     private Architecture architecture;
     private TimingGraph timingGraph;
-    private ResourceGraph resourceGraph;
 
     private Set<String> globalNetNames;
     private Map<BlockType, List<AbstractBlock>> blocks;
@@ -41,27 +44,24 @@ public class Circuit {
     private List<BlockType> globalBlockTypes;
     private List<GlobalBlock> globalBlockList = new ArrayList<GlobalBlock>();
     
+    private Integer dieNum;
     private List<BlockType> columns;
     private Map<BlockType, List<Integer>> columnsPerBlockType;
     private List<List<List<Integer>>> nearbyColumns;
     
-    public Circuit(String name, Architecture architecture, Map<BlockType, List<AbstractBlock>> blocks) {
+    public Circuit(String name, Architecture architecture, Map<BlockType, List<AbstractBlock>> blocks, int dieCounter) {
         this.name = name;
         this.architecture = architecture;
-
+        this.dieNum = dieCounter;
         this.blocks = blocks;
-        
         this.timingGraph = new TimingGraph(this);
-        this.resourceGraph = new ResourceGraph(this);
     }
     
     public void initializeData() {
         this.loadBlocks();
-
         this.initializeGlobalNets();
-        
-        this.initializeResourceGraph();
-        this.initializeTimingGraph();
+        this.markConstantGenerators();
+        this.markGlobalNetIOPins();
 
         for(List<AbstractBlock> blocksOfType : this.blocks.values()) {
             for(AbstractBlock block : blocksOfType) {
@@ -70,12 +70,15 @@ public class Circuit {
         }
     }
     
+    public Integer getCurrentDie() {
+    	return this.dieNum;
+    }
     public void initializeTimingGraph() {
     	this.timingGraph.build();
     }
-    public void initializeResourceGraph() {
-    	this.resourceGraph.build();
-    }
+
+    
+
     
     private void initializeGlobalNets() {
     	this.globalNetNames = new HashSet<>();
@@ -164,6 +167,93 @@ public class Circuit {
         this.createColumns();
     }
     
+    private void markGlobalNetIOPins() {
+    	String netName;
+    	for(GlobalBlock globalBlock : this.getGlobalBlocks()) {
+    		for(AbstractPin inputPin : globalBlock.getInputPins()) {
+    			GlobalPin sinkPin = (GlobalPin) inputPin;
+    			netName = sinkPin.getNetName();
+    			if(this.globalNetNames.contains(netName)) {
+    				sinkPin.setGlobalNetPin();
+    				if(sinkPin.toString().contains("attention^ADD~15972-0[0].datax[0]")) {
+    					System.out.print("\nThis is also true");
+    				}
+    				
+    			}
+    		}
+    		
+        	for(AbstractPin outputPin : globalBlock.getOutputPins()) {
+        		GlobalPin sourcePin = (GlobalPin) outputPin;
+        		netName = sourcePin.getNetName();
+    			if(this.globalNetNames.contains(netName)) {
+    				sourcePin.setGlobalNetPin();
+    				if(sourcePin.toString().contains("attention.qk_acc.Add_u17^ADD~6699-0[0].dataout[2]")) {
+    					System.out.print("\nThis is true");
+    				}
+    			}
+        	}
+    		
+    	}
+    }
+    
+    private void markConstantGenerators() {
+    	int constantCounter = 0;
+    	try (BufferedReader reader = new BufferedReader(new FileReader(this.architecture.getBlifFile()))) {
+ 	            String line;
+ 	            StringBuilder currentNetName = null;
+
+ 	            while ((line = reader.readLine()) != null) {
+ 	                if (line.startsWith(".names")) {
+ 	                    Matcher matcher = Pattern.compile("\\.names\\s(\\S+)").matcher(line);
+ 	                    if (matcher.find()) {
+ 	                        currentNetName = new StringBuilder(matcher.group(1));
+ 	                    }
+ 	                } else if ((line.trim().equals("0") || line.trim().equals("1")) && currentNetName != null) {
+ 	                	this.globalNetNames.add(currentNetName.toString());
+ 	                	constantCounter++;
+ 	                    currentNetName = null;
+ 	                }
+ 	            }
+ 	        } catch (IOException e) {
+ 	            e.printStackTrace();
+ 	        }
+
+
+
+    	for(GlobalBlock globalBlock : this.getGlobalBlocks()) {
+    		BlockType clbType = BlockType.getBlockTypes(BlockCategory.CLB).get(0);
+    		if(globalBlock.getType().equals(clbType)) {
+	    		int numConn = 0;
+	    		String netName = null;
+	    		Boolean inputOpen = false;
+	        	for(AbstractPin inputPin : globalBlock.getInputPins()) {
+	        		GlobalPin sourcePin = (GlobalPin) inputPin;
+	        		netName = sourcePin.getNetName();
+	        		if(netName != null) {
+	        			inputOpen = true;
+	        		}
+	        	}
+	        	if(!inputOpen) {
+		        	for(AbstractPin outputPin : globalBlock.getOutputPins()) {
+		        		GlobalPin sourcePin = (GlobalPin) outputPin;
+		        		if(sourcePin.getNumSinks() > 0) {
+		        			netName = sourcePin.getNetName();
+		        			numConn++;
+		        		}
+		        		
+		        	}
+		        	if(numConn == 1) {
+		        		constantCounter++;
+		        		this.globalNetNames.add(netName);
+		        	}
+	        	}
+
+    	}
+	}
+
+    	System.out.print("\nConstant generator count is " + constantCounter + "\n");
+    }
+    
     private void createColumns() {
         BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
         BlockType clbType = BlockType.getBlockTypes(BlockCategory.CLB).get(0);
@@ -195,8 +285,8 @@ public class Circuit {
     /***************
      * CONNECTIONS *
      ***************/
-    public void loadNetsAndConnections() {
-    	short boundingBoxRange = 3;
+    public int loadNetsAndConnections(int idCounter) {
+    	short boundingBoxRange = 3; //Why is the bounding box restricted to 3?
     	
     	this.connections = new ArrayList<>();
     	this.nets = new ArrayList<>();
@@ -209,25 +299,28 @@ public class Circuit {
         		if(sourcePin.getNumSinks() > 0) {
         			String netName = sourcePin.getNetName();
             		
+        			
         			if(!this.globalNetNames.contains(netName)) {
-    	        		List<Connection> net = new ArrayList<>();
-    	        		
-    	        		for(AbstractPin abstractSinkPin : sourcePin.getSinks()) {
-    	        			GlobalPin sinkPin = (GlobalPin) abstractSinkPin;
-    	        			
-    	        			Connection c = new Connection(id, sourcePin, sinkPin);
-    	        			this.connections.add(c);
-    	        			net.add(c);
-    	        			
-    	        			id++;
-    	        		}
-    	        		
-    	        		this.nets.add(new Net(net, boundingBoxRange));
+        				if(!sourcePin.getSLLGlobalPin()) {
+	    	        		List<Connection> net = new ArrayList<>();
+	    	        		for(AbstractPin abstractSinkPin : sourcePin.getSinks()) {
+	    	        				GlobalPin sinkPin = (GlobalPin) abstractSinkPin;
+	        	        			Connection c = new Connection(id, sourcePin, sinkPin, this.dieNum);
+	        	        			this.connections.add(c);
+	        	        			net.add(c);
+	        	        			
+	        	        			id++;
+	    	        			}
+	    	        		//The last parameter is for SLL fanout, which is calculated in CircuitSLL class and hence fixed to 0 here.
+		        			this.nets.add(new Net(netName, net, boundingBoxRange, 0));
+	        			}
         			}
         		}
         	}
-        }
+    	}
+    	return id;
     }
+    
     public int maximumNetLength() {
     	int maximumNetLength = 0;
     	for(Net net : this.nets) {
@@ -237,6 +330,23 @@ public class Circuit {
     		}
     	}
     	return maximumNetLength;
+    }
+    
+    public void printNetDelays() {
+    	for(Net net : this.nets) {
+    		float delay, maxDelay = 0;
+    		
+    		List<Connection> connsOfNets = net.getConnections();
+    		for(Connection eachConnection : connsOfNets) {
+    			TimingNode sinkNode = eachConnection.getSinkNode();
+    			delay = (sinkNode.getArrivalTime() - sinkNode.clockDelay);
+    			if(delay > maxDelay) {
+    				maxDelay = delay;
+    			}
+    			
+    		}
+    		System.out.print("\nThe net name is " + net.getName() + " and the delay is " + maxDelay);
+    	}
     }
     
     private void calculateSize(BlockType ioType, List<BlockType> blockTypes) {
@@ -249,7 +359,7 @@ public class Circuit {
         } else {
             this.width = this.architecture.getWidth();
             this.height = this.architecture.getHeight();
-            System.out.println("Fixed size: " +  this.width + "x" + this.height + "\n");
+            System.out.println("\nFixed size: " +  this.width + "x" + this.height + "\n");
         }
     }
     
@@ -265,11 +375,6 @@ public class Circuit {
 
         while(!bigEnough) {
             size += 1;
-
-            // Enlarge the architecture by at most 1 block in each
-            // dimension
-            // VPR does this really strange: I would expect that the if clause is
-            // inverted (if(autoRatio < 1)), maybe this is a bug?
             previousWidth = this.width;
             if(autoRatio >= 1) {
                 this.height = size;
@@ -319,8 +424,9 @@ public class Circuit {
          */
     	
         this.columns = new ArrayList<BlockType>(this.width+2);
-        this.columns.add(ioType);
-        for(int column = 1; column < this.width + 1; column++) {
+        this.columns.add(null);
+        this.columns.add(1, ioType);
+        for(int column = 2; column < this.width - 2; column++) {
             for(BlockType blockType : blockTypes) {
                 int repeat = blockType.getRepeat();
                 int start = blockType.getStart();
@@ -330,7 +436,8 @@ public class Circuit {
                 }
             }
         }
-        this.columns.add(ioType);
+        this.columns.add(this.width - 2, ioType);
+        this.columns.add(null);
     }
     private void cacheColumnsPerBlockType(List<BlockType> blockTypes) {
         /**
@@ -342,7 +449,7 @@ public class Circuit {
         for(BlockType blockType : blockTypes) {
             this.columnsPerBlockType.put(blockType, new ArrayList<Integer>());
         }
-        for(int column = 1; column < this.width + 1; column++) {
+        for(int column = 2; column < this.width - 2; column++) {
             this.columnsPerBlockType.get(this.columns.get(column)).add(column);
         }
     }
@@ -360,7 +467,7 @@ public class Circuit {
         int size = Math.max(this.width, this.height);
 
         // Loop through all the columns
-        for(int column = 1; column < this.width + 1; column++) {
+        for(int column = 2; column < this.width - 1 ; column++) {
             BlockType columnType = this.columns.get(column);
 
             // previousNearbyColumns will contain all the column indexes
@@ -385,7 +492,7 @@ public class Circuit {
                 }
 
                 int right = column + distance;
-                if(right <= this.width && this.columns.get(right).equals(columnType)) {
+                if(right <= this.width - 2 && this.columns.get(right).equals(columnType)) {
                     newNearbyColumns.add(right);
                 }
 
@@ -420,9 +527,6 @@ public class Circuit {
 
     public Architecture getArchitecture() {
         return this.architecture;
-    }
-    public ResourceGraph getResourceGraph() {
-    	return this.resourceGraph;
     }
     
     public BlockType getColumnType(int column) {

@@ -14,14 +14,15 @@ import pack.util.ErrorLog;
 import pack.util.Output;
 import pack.util.ThreadPool;
 //import pack.util.Util;
+import pack.util.Util;
 
 public class DieLevelNetlist {
 		private Netlist root;
 		private Partition partition;
-		//private Architecture architecture;
 		private Simulation simulation;
 
 		private String vpr_folder;
+		private String result_folder;
 
 		private Set<String> netlistInputs;
 		private Set<String> netlistOutputs;
@@ -36,15 +37,13 @@ public class DieLevelNetlist {
 		public DieLevelNetlist(Netlist root, Partition partition, Simulation simulation){
 			this.root = root;
 			this.partition = partition;
-			//this.architecture = architecture;
 			this.simulation = simulation;
 
 			this.vpr_folder = simulation.getStringValue("vpr_folder");
-
+			this.result_folder = simulation.getStringValue("result_folder");
 			this.logicBlocks = new ArrayList<>();
 
 			this.findNetlistInputsAndOutputTerminalNames();
-			//this.deleteExistingFiles();
 
 
 		}
@@ -94,8 +93,7 @@ public class DieLevelNetlist {
 		}
 		
 		public void GenerateDieNetlist(){
-			//Output.println("PHASE 2: SEED BASED PACKING");
-			//Output.newLine();
+
 			boolean dielevel = true;
 			this.logicBlocks = new ArrayList<>();
 			this.leafNodes = new ArrayList<>();
@@ -110,10 +108,12 @@ public class DieLevelNetlist {
 
 			//Analyze the hierarchy recursively and give each netlist a hierarchy identifier
 			this.root.setDieRecursiveHierarchyIdentifier("");
-			//for(Netlist subcircuit:this.subcircuits){
-			//      System.out.println(subcircuit.getHierarchyIdentifier());
-			//}
-			
+			double unpackTime = 0.0;
+			for(Netlist subcircuit:this.subcircuits){
+				unpackTime += subcircuit.unpack_all_molecules();
+			}
+			Output.println("\tUnpack molecules took " + Util.round(unpackTime, 2) + " sec");
+			Output.newLine();
 			Output.println("\tLeaf nodes: " + this.subcircuits.size());
 			Output.print("\t\t");
 			int no = 0;
@@ -134,11 +134,12 @@ public class DieLevelNetlist {
 			while(!this.subcircuits.isEmpty() && !this.threadPool.isEmpty()){
 				Netlist leafNode = this.subcircuits.remove(0);
 				int thread = this.threadPool.getThread();
-				//Output.println("The threads are " + thread );
-				leafNode.writeSDC(this.vpr_folder + "vpr/files/", thread, this.partition, this.simulation.getSimulationID());
-				leafNode.writeBlif(this.vpr_folder + "vpr/files/", thread, this.partition, this.simulation.getSimulationID(),dielevel);
+				leafNode.writeBlif(this.result_folder, thread, this.partition, this.simulation.getSimulationID(),dielevel);
 				
 			}
+			
+			
+			
 		}
 		
 }

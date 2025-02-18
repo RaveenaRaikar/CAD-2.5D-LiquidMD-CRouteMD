@@ -10,6 +10,7 @@ import java.util.Random;
 import java.util.Set;
 
 import place.circuit.Circuit;
+import place.circuit.timing.TimingGraphSLL;
 import place.placers.Placer;
 import place.visual.PlacementVisualizer;
 
@@ -52,9 +53,12 @@ class PlacerFactory {
     }
 
     private <T extends Placer> Constructor<T> getConstructor(Class<T> placerClass) throws NoSuchMethodException, SecurityException {
-        return placerClass.getConstructor(Circuit.class, Options.class, Random.class, Logger.class, PlacementVisualizer.class);
+        return placerClass.getConstructor(Circuit[].class, Options.class, Random.class, Logger.class, PlacementVisualizer[].class, int.class, int.class);
     }
 
+    private <T extends Placer> Constructor<T> getNewConstructor(Class<T> placerClass) throws NoSuchMethodException, SecurityException {
+        return placerClass.getConstructor(Circuit[].class, Options.class, Random.class, Logger.class, PlacementVisualizer[].class, int.class, int.class, TimingGraphSLL.class);
+    }
 
     public Options initOptions(String placerName) {
 
@@ -75,12 +79,28 @@ class PlacerFactory {
 
 
 
-    public Placer newPlacer(String placerName, Circuit circuit, Options options, Random random, PlacementVisualizer visualizer) {
+    public Placer newPlacer(String placerName, Circuit[] circuit, Options options, Random random, 
+    		PlacementVisualizer[] visualizer, int totalDies, int SLLrows) {
         try {
             Class<? extends Placer> placerClass = this.getClass(placerName);
             Constructor<? extends Placer> placerConstructor = this.getConstructor(placerClass);
+            System.out.print("\nThe placer name is " + placerName + "\n" );
+            
+            return placerConstructor.newInstance(circuit, options, random, this.logger, visualizer, totalDies, SLLrows);
 
-            return placerConstructor.newInstance(circuit, options, random, this.logger, visualizer);
+        } catch(IllegalArgumentException | ClassNotFoundException | NoSuchMethodException | SecurityException | InstantiationException | IllegalAccessException | InvocationTargetException error) {
+            this.logger.raise(error);
+            return null;
+        }
+    }
+    public Placer newPlacer(String placerName, Circuit[] circuit, Options options, Random random, 
+    		PlacementVisualizer[] visualizer, int totalDies, int SLLrows, TimingGraphSLL timingGraphSLL) {
+        try {
+            Class<? extends Placer> placerClass = this.getClass(placerName);
+            Constructor<? extends Placer> placerConstructor = this.getNewConstructor(placerClass);
+            System.out.print("\nThe placer name is " + placerName + "\n" );
+            
+            return placerConstructor.newInstance(circuit, options, random, this.logger, visualizer, totalDies, SLLrows, timingGraphSLL);
 
         } catch(IllegalArgumentException | ClassNotFoundException | NoSuchMethodException | SecurityException | InstantiationException | IllegalAccessException | InvocationTargetException error) {
             this.logger.raise(error);

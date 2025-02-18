@@ -18,43 +18,44 @@ public class VPRThread {
 	private String run;
 	private int size;
 	private Netlist netlist;
+	private int PartNum;
 
-	public VPRThread(int thread, Simulation simulation, Netlist netlist){
+	public VPRThread(int thread, Simulation simulation, Netlist netlist, int DieNum){
 		this.thread = thread;
 		this.simulation = simulation;
 		this.run = new String();
 		this.netlist = netlist;
+		this.PartNum = DieNum;
 	}
-
+	public VPRThread(Simulation simulation, Netlist netlist, int DieNum){
+		this.simulation = simulation;
+		this.run = new String();
+		this.netlist = netlist;
+		this.PartNum = DieNum;
+	}
 	public void run(int size){
 		String circuit = this.simulation.getStringValue("circuit");
 		String vpr_folder = this.simulation.getStringValue("vpr_folder");
 		String result_folder = this.simulation.getStringValue("result_folder");
+		String ArchName = "arch.light_" + this.PartNum + ".xml";
+		
 		
 		if(vpr_folder.lastIndexOf("/") != vpr_folder.length() - 1) vpr_folder += "/";
 		if(result_folder.lastIndexOf("/") != result_folder.length() - 1) result_folder += "/";
 		
 		this.run = new String();
 		this.run += vpr_folder + "vpr/vpr" + " ";
-    	//this.run += result_folder + "arch.pack.xml" + " ";
-		this.run += result_folder + "Huawei_arch_multi_die_V2.xml" + " ";
-		//this.run += result_folder + "stratixiv_arch.timing.xml" + " ";
-		//this.run += result_folder + "k6FracN10LB_mem20K_complexDSP_customSB_22nm.xml" + " ";
-		
+    	this.run += result_folder + ArchName+ " ";
+    	
     	this.run += vpr_folder + "vpr/files/" + circuit + "_" + this.simulation.getSimulationID() + "_" + this.thread + ".blif" + " ";
-    	this.run += "--pack" + " ";
+    	this.run += "--pack" + " " + "--absorb_buffer_luts" + " " + "on";
    
     	ProcessBuilder pb = new ProcessBuilder(this.run.split(" "));
     	try {
-    		/* VTR8 is failing if the process is started from the vpr/files folder. This error is invalid and is not 
-    		 * observed when the process starts from root directory. 
-    		 * TODO : Delete the .net files from subsequent thread files from the CAD_framework.
-    		 */
     		this.proc = pb.start();
             BufferedReader reader = new BufferedReader(new InputStreamReader(this.proc.getInputStream()));
                  String line;
                  while ((line = reader.readLine()) != null) {
-                  //  System.out.println(line);
            }
 	
         }catch (IOException e) {
@@ -67,7 +68,41 @@ public class VPRThread {
 		this.size = size;
 	}
 	
-	//public boolean isRunning() {
+	public void runaapack(int size){
+		String circuit = simulation.getStringValue("circuit") + "_" + this.simulation.getIntValue("simulation_ID") +"_die_" + this.PartNum + ".blif";
+		String vpr_folder = simulation.getStringValue("vpr_folder");
+		String result_folder = simulation.getStringValue("result_folder");
+		String arch_name = simulation.getStringValue("architecture");
+		
+		
+		if(vpr_folder.lastIndexOf("/") != vpr_folder.length() - 1) vpr_folder += "/";
+		if(result_folder.lastIndexOf("/") != result_folder.length() - 1) result_folder += "/";
+		
+		this.run = new String();
+		this.run += vpr_folder + "vpr/vpr" + " ";
+    	this.run += result_folder + arch_name+ " ";
+		
+    	this.run += result_folder + "/" + circuit + " ";;
+    	this.run += "--pack" + " " + "--absorb_buffer_luts" + " " + "off";
+   
+    	ProcessBuilder pb = new ProcessBuilder(this.run.split(" "));
+    	try {
+    		this.proc = pb.start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(this.proc.getInputStream()));
+                 String line;
+                 while ((line = reader.readLine()) != null) {
+           }
+	
+        }catch (IOException e) {
+			Output.println("Problems with vpr process");
+			e.printStackTrace();
+		}
+    	
+		Output.println("\t\t" + circuit + " | | Blocks: " + Util.fill(size,5));
+		
+		this.size = size;
+	}
+
 	public boolean isRunning(int i) {
 		try {
 			this.proc.exitValue();

@@ -10,6 +10,7 @@ public class Simulation{
 	private int maxNameSize;
 	private int maxDescriptionSize;
 	private int simulationID;
+//	private ub
 
 	public Simulation(){
 		this.options = new LinkedHashMap<String, Option>();
@@ -25,22 +26,26 @@ public class Simulation{
 		this.addOption(new Option("hmetis_quality","quality setting for hMetis paritioning", 2));
 		
 		this.addOption(new Option("Number_of_die","Number of dies in FPGA fabric", 2));
-		this.addOption(new Option("UB_factor_die","unbalance factor at top level partitioning", 5));
+		this.addOption(new Option("UB_factor_die","unbalance factor at top level partitioning", 12));
+		this.addOption(new Option("Die_Density","Maximum density of a die in multidie system", 0.8));
 		this.addOption(new Option("unbalance_factor","unbalance factor of hMetis paritioning", 25));
 		this.addOption(new Option("max_pack_size","the maxmimum number of blocks in the independent subcircuits for seed based packing", 2500));
 		this.addOption(new Option("max_fanout","the maximum fanout of the added nets during partitioning", 100));
 		
 		this.addOption(new Option("num_threads","the number of available threads", 20));
 		
-		this.addOption(new Option("min_crit","minimum criticality of the critical connections", 0.7));
+		this.addOption(new Option("min_crit","minimum criticality of the critical connections", 0.8));
 		this.addOption(new Option("max_per_crit_edge","maximum percentage of critical connections", 20));
 		this.addOption(new Option("timing_weight","weight of critical connections", 10));
 		this.addOption(new Option("timing_edge_weight_update", "update the weight on the critical paths with a cut edge", true));
 		
-		this.addOption(new Option("logfile","print console output to logfile", false));
-		this.addOption(new Option("print_stats_to_file","print additional information of MultiPart algorithm to separate stats files", false));
-		//TO-DO Add more options for interposer based structure
+		this.addOption(new Option("logfile","print console output to logfile", true));
+		this.addOption(new Option("print_stats_to_file","print additional information of MultiPart algorithm to separate stats files", true));
+		this.addOption(new Option("Interposer_wire_delay", " Delay of cross-die wire in ps", 2224));
+		this.addOption(new Option("simulation_ID", "this is for testing", 111111));
 		this.simulationID = (int)Math.round(Math.random()*1000000);
+		System.out.print("\nThe simulationID is " + this.simulationID);
+		System.out.println();
 	}
 	public boolean hasOption(Option option){
 		return this.hasOption(option.getName());

@@ -87,6 +87,7 @@ public class DelayTables implements Serializable {
             for(int i = 1; i < lineDelayStrings.length; i++) {
                 Double lineDelay = Double.parseDouble(lineDelayStrings[i]);
                 matrix.get(y).add(lineDelay);
+                
             }
 
             y++;
@@ -108,16 +109,17 @@ public class DelayTables implements Serializable {
                 return this.clbToClb;
             }
         }
+
     }
 
     public double getDelay(BlockCategory fromCategory, BlockCategory toCategory, int deltaX, int deltaY) {
         if(deltaX == 0 && deltaY == 0 || this.dummyTables) {
             return 0;
         }
-        
         List<List<Double>> delayTable = this.getTable(fromCategory, toCategory);
         deltaY = Math.min(deltaY, delayTable.size() - 1);
         
+
         List<Double> delayArray = delayTable.get(deltaY);
         deltaX = Math.min(deltaX, delayArray.size() - 1);
         

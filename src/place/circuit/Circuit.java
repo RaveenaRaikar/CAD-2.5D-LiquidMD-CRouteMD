@@ -18,14 +18,21 @@ import place.circuit.block.GlobalBlock;
 import place.circuit.block.IOSite;
 import place.circuit.block.Macro;
 import place.circuit.block.Site;
+import place.circuit.block.VirtualSite;
+import place.circuit.pin.AbstractPin;
 import place.circuit.pin.GlobalPin;
 import place.circuit.timing.TimingGraph;
+import place.circuit.timing.TimingGraphSLL;
+import java.io.*;
+import java.util.*;
 
 public class Circuit {
 
     private String name;
     private transient int width, height;
-
+    private int dienum;  //Current die number
+    private int totaldie; //To know the total dies in the system
+    private int sllRows;
     private Architecture architecture;
 
     private TimingGraph timingGraph;
@@ -41,7 +48,8 @@ public class Circuit {
     private Map<BlockType, List<Integer>> columnsPerBlockType;
     private List<List<List<Integer>>> nearbyColumns;
 
-    private AbstractSite[][] sites;
+    private AbstractSite[][][] sites;
+    private AbstractSite[][][] virtualSites;
 
 
     public Circuit(String name, Architecture architecture, Map<BlockType, List<AbstractBlock>> blocks) {
@@ -53,18 +61,37 @@ public class Circuit {
         this.timingGraph = new TimingGraph(this);
     }
 
+    public Circuit(String name, Architecture architecture, Map<BlockType, List<AbstractBlock>> blocks, int totdie, int dieNum, int SLLrows) {
+        this.name = name;
+        this.architecture = architecture;
+        this.totaldie = totdie;
+        this.blocks = blocks;
+        this.dienum = dieNum;
+        this.sllRows = SLLrows;
+        this.timingGraph = new TimingGraph(this);
+        
+        
+        this.width = this.architecture.getWidth();
+        this.height = this.architecture.getHeight();
+    	this.sites = new AbstractSite[this.totaldie][this.width][this.height];
+    	this.virtualSites = new AbstractSite[this.totaldie][this.width][this.height];
+        
+    }
 
-    public void initializeData() {
-        this.loadBlocks();
+    public void initializeData(int dieNumber) {
+        this.loadBlocks(dieNumber);
 
         this.timingGraph.build();
 
         for(List<AbstractBlock> blocksOfType : this.blocks.values()) {
+        	//
             for(AbstractBlock block : blocksOfType) {
                 block.compact();
             }
         }
     }
+    
+
     public String stats(){
     	String s = new String();
     	s += "-------------------------------";
@@ -86,54 +113,57 @@ public class Circuit {
     }
 
 
-    private void loadBlocks() {
+    private void loadBlocks(int dieNumber) {
+    	//Adding the blocks from the architecture
         for(BlockType blockType : BlockType.getBlockTypes()) {
             if(!this.blocks.containsKey(blockType)) {
                 this.blocks.put(blockType, new ArrayList<AbstractBlock>(0));
             }
         }
-
+        
+        
+        //Add SLL DUMMY as a block type
         this.globalBlockTypes = BlockType.getGlobalBlockTypes();
 
         for(BlockType blockType : this.globalBlockTypes) {
-            @SuppressWarnings("unchecked")
-            List<GlobalBlock> blocksOfType = (List<GlobalBlock>) (List<?>) this.blocks.get(blockType);
+            List<GlobalBlock> blocksOfType = (List<GlobalBlock>)(List<?>) this.blocks.get(blockType);
             this.globalBlockList.addAll(blocksOfType);
         }
 
         this.loadMacros();
 
         this.createColumns();
-        this.createSites();
+        this.createSites(dieNumber);
     }
 
     private void loadMacros() {
         for(BlockType blockType : this.globalBlockTypes) {
-
-            // Skip block types that don't have a carry chain
-            if(blockType.getCarryFromPort() == null) {
-                continue;
-            }
-
-            for(AbstractBlock abstractBlock : this.blocks.get(blockType)) {
-                GlobalBlock block = (GlobalBlock) abstractBlock;
-                GlobalPin carryIn = block.getCarryIn();
-                GlobalPin carryOut = block.getCarryOut();
-
-                if(carryIn.getSource() == null && carryOut.getNumSinks() > 0) {
-                    List<GlobalBlock> macroBlocks = new ArrayList<>();
-                    macroBlocks.add(block);
-
-                    while(carryOut.getNumSinks() != 0) {
-                        block = carryOut.getSink(0).getOwner();
-                        carryOut = block.getCarryOut();
-                        macroBlocks.add(block);
-                    }
-
-                    Macro macro = new Macro(macroBlocks);
-                    this.macros.add(macro);
+        	if(!blockType.getName().equals("EMPTY")) {
+                // Skip block types that don't have a carry chain
+                if(blockType.getCarryFromPort() == null) {
+                    continue;
                 }
-            }
+                
+                for(AbstractBlock abstractBlock : this.blocks.get(blockType)) {
+                    GlobalBlock block = (GlobalBlock) abstractBlock;
+                    GlobalPin carryIn = block.getCarryIn();
+                    GlobalPin carryOut = block.getCarryOut();
+                    if(carryIn.getSource() == null && carryOut.getNumSinks() > 0) {
+                        List<GlobalBlock> macroBlocks = new ArrayList<>();
+                        macroBlocks.add(block);
+
+                        while(carryOut.getNumSinks() != 0) {
+                            block = carryOut.getSink(0).getOwner();
+                            carryOut = block.getCarryOut();
+                            macroBlocks.add(block);
+                        }
+
+                        Macro macro = new Macro(macroBlocks);
+                        this.macros.add(macro);
+                    }
+                }
+        	}
+
         }
     }
 
@@ -141,6 +171,7 @@ public class Circuit {
     private void createColumns() {
         BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
         BlockType clbType = BlockType.getBlockTypes(BlockCategory.CLB).get(0);
+        BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
         List<BlockType> hardBlockTypes = BlockType.getBlockTypes(BlockCategory.HARDBLOCK);
 
         // Create a list of all global block types except the IO block type,
@@ -161,7 +192,7 @@ public class Circuit {
 
         // Fill some extra data containers to quickly calculate
         // often used data
-        this.cacheColumns(ioType, blockTypes);
+        this.cacheColumns(ioType, emptyType, blockTypes);
         this.cacheColumnsPerBlockType(blockTypes);
         this.cacheNearbyColumns();
     }
@@ -193,11 +224,6 @@ public class Circuit {
 
         while(!bigEnough) {
             size += 1;
-
-            // Enlarge the architecture by at most 1 block in each
-            // dimension
-            // VPR does this really strange: I would expect that the if clause is
-            // inverted (if(autoRatio < 1)), maybe this is a bug?
             previousWidth = this.width;
             if(autoRatio >= 1) {
                 this.height = size;
@@ -222,7 +248,7 @@ public class Circuit {
 
 
             // Check if the architecture is large enough
-            int ioCapacity = (this.width + this.height) * 2 * this.architecture.getIoCapacity();
+            int ioCapacity = (this.width +(2* this.height)) * this.architecture.getIoCapacity();
             if(ioCapacity >= this.getBlocks(ioType).size()) {
                 bigEnough = true;
 
@@ -241,14 +267,15 @@ public class Circuit {
         }
     }
     
-    private void cacheColumns(BlockType ioType, List<BlockType> blockTypes) {
+    private void cacheColumns(BlockType ioType, BlockType emptyType, List<BlockType> blockTypes) {
         /**
          * Make a list that contains the block type of each column
          */
     	
-        this.columns = new ArrayList<BlockType>(this.width+2);
+        this.columns = new ArrayList<BlockType>(this.width);
+        this.columns.add(emptyType);
         this.columns.add(ioType);
-        for(int column = 1; column < this.width + 1; column++) {
+        for(int column = 2; column < this.width - 2; column++) {
             for(BlockType blockType : blockTypes) {
                 int repeat = blockType.getRepeat();
                 int start = blockType.getStart();
@@ -259,6 +286,7 @@ public class Circuit {
             }
         }
         this.columns.add(ioType);
+        this.columns.add(emptyType);
     }
 
     private void cacheColumnsPerBlockType(List<BlockType> blockTypes) {
@@ -266,12 +294,12 @@ public class Circuit {
          *  For each block type: make a list of the columns that contain
          *  blocks of that type
          */
-
+    	
         this.columnsPerBlockType = new HashMap<BlockType, List<Integer>>();
         for(BlockType blockType : blockTypes) {
             this.columnsPerBlockType.put(blockType, new ArrayList<Integer>());
         }
-        for(int column = 1; column < this.width + 1; column++) {
+        for(int column = 2; column < this.width - 2 ; column++) {
             this.columnsPerBlockType.get(this.columns.get(column)).add(column);
         }
     }
@@ -289,7 +317,7 @@ public class Circuit {
         int size = Math.max(this.width, this.height);
 
         // Loop through all the columns
-        for(int column = 1; column < this.width + 1; column++) {
+        for(int column = 0; column < this.width; column++) {
             BlockType columnType = this.columns.get(column);
 
             // previousNearbyColumns will contain all the column indexes
@@ -314,42 +342,78 @@ public class Circuit {
                 }
 
                 int right = column + distance;
-                if(right <= this.width && this.columns.get(right).equals(columnType)) {
-                    newNearbyColumns.add(right);
-                }
+                if(right < this.width - 1) {
+	                if(right <= this.width - 2 && this.columns.get(right).equals(columnType)) {
+	                    newNearbyColumns.add(right);
+	                }
 
                 nearbyColumnsPerDistance.add(newNearbyColumns);
                 previousNearbyColumns = newNearbyColumns;
+                }
             }
 
             this.nearbyColumns.add(nearbyColumnsPerDistance);
         }
     }
 
-    private void createSites() {
-        this.sites = new AbstractSite[this.width+2][this.height+2];
+    private void createSites(int dieNumber) {
+
 
         BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
+        BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
+        BlockType SllType = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
         int ioCapacity = this.architecture.getIoCapacity();
+	     for (int i = 0; i < this.height ; i++) {
+	         this.sites[this.dienum][0][i] = new Site(this.dienum, 0, i, emptyType);
+	         this.sites[this.dienum][this.width - 1][i] = new Site(this.dienum, this.width - 1, i, emptyType);
+	     }
+	     // Rows for EMPTY
+	     if (dieNumber == 0) {
+	         for (int i = 0; i < this.width; i++) {
+	             this.sites[this.dienum][i][0] = new Site(this.dienum, i, 0, emptyType);
+	         }
+	     } else if (dieNumber == 1) {
+	         for (int i = 0; i < this.width; i++) {
+	             this.sites[this.dienum][i][this.height - 1] = new Site(this.dienum, i, this.height - 1, emptyType);
+	         }
+	     }
+	     
         
-        for(int i = 1; i < this.height + 1; i++) {
-            this.sites[0][i] = new IOSite(0, i, ioType, ioCapacity);
-            this.sites[this.width + 1][i] = new IOSite(this.width + 1, i, ioType, ioCapacity);
-        }
+	     // Columns for IOs
+	     for (int i = 1; i < this.height - 1; i++) {
+	         this.sites[this.dienum][1][i] = new IOSite(this.dienum, 1, i, ioType, ioCapacity);
+	         this.sites[this.dienum][this.width - 2][i] = new IOSite(this.dienum, this.width - 2, i, ioType, ioCapacity);
+	     }
+	
+	     // Rows for IOs
+	     if (dieNumber == 0) {
+	         for (int i = 1; i < this.width - 1; i++) {
+	             this.sites[this.dienum][i][1] = new IOSite(this.dienum, i, 1, ioType, ioCapacity);
+	         }
+	     } else if (dieNumber == 1) {
+	         for (int i = 1; i < this.width - 1; i++) {
+	             this.sites[this.dienum][i][this.height - 2] = new IOSite(this.dienum, i, this.height - 2, ioType, ioCapacity);
+	         }
+	     }
+	
+	     for (int column = 2; column < this.width - 2; column++) {
+	         BlockType blockType = this.columns.get(column);
+	         int blockHeight = blockType.getHeight();
+	         for (int row = 2; row < this.height - 1 - blockHeight; row += blockHeight) {
+	             this.sites[this.dienum][column][row] = new Site(this.dienum, column, row, blockType);
+	         }
+	     }
+	
+	     // For a SLL region
+	     for (int column = 1; column < this.width - 1; column++) {
+	         int startRow = (dieNumber == 0) ? this.height + 1 - this.sllRows : 0;
+	         int endRow = (dieNumber == 0) ? this.height : this.sllRows;
+	
+	         for (int row = startRow; row < endRow; row++) {
+	             this.virtualSites[this.dienum][column][row] = new VirtualSite(this.dienum, column, row, SllType);
+	         }
+	     }
 
-        for(int i = 1; i < this.width + 1; i++) {
-            this.sites[i][0] = new IOSite(i, 0, ioType, ioCapacity);
-            this.sites[i][this.height + 1] = new IOSite(i, this.height + 1, ioType, ioCapacity);
-        }
-
-        for(int column = 1; column < this.width + 1; column++) {
-            BlockType blockType = this.columns.get(column);
-            
-            int blockHeight = blockType.getHeight();
-            for(int row = 1; row < this.height + 2 - blockHeight; row += blockHeight) {
-                this.sites[column][row] = new Site(column, row, blockType);
-            }
-        }
     }
 
 
@@ -363,17 +427,24 @@ public class Circuit {
     }
 
     public void recalculateTimingGraph() {
+
         this.timingGraph.calculateCriticalities(true);
     }
     public double getMaxDelay() {
         return this.timingGraph.getMaxDelay();
     }
-
-
+    public double getTotalTimingCost() {
+        return this.timingGraph.calculateTotalCost();
+    }
+    public void getTimingInfo() {
+        this.timingGraph.printTimingInfo();
+    }
+    
 
     public List<GlobalBlock> getGlobalBlocks() {
         return this.globalBlockList;
     }
+
 
     public List<Macro> getMacros() {
         return this.macros;
@@ -392,6 +463,17 @@ public class Circuit {
     public int getHeight() {
         return this.height;
     }
+    public int getCurrentDie() {
+        return this.dienum;
+    }
+    public int getTotalDie() {
+        return this.totaldie;
+    }
+    
+    public int getSLLrows() {
+    	return this.sllRows;
+    }
+    
     public Architecture getArchitecture() {
         return this.architecture;
     }
@@ -406,18 +488,42 @@ public class Circuit {
      * return the site that overlaps coordinate (x, y) but possibly
      * doesn't start at that position.
      */
-    public AbstractSite getSite(int column, int row) {
-        return this.getSite(column, row, false);
+    public AbstractSite getSite(int dieNum, int column, int row) {
+        return this.getSite(dieNum, column, row, false);
     }
-    public AbstractSite getSite(int column, int row, boolean allowNull) {
+    public AbstractSite getSite(int dieNum, int column, int row, boolean allowNull) {
         if(allowNull) {
-            return this.sites[column][row];
+            return this.sites[dieNum][column][row];
+
+        } else {
+            AbstractSite site = null;
+            int topY = row;
+
+            while(site == null) {
+                site = this.sites[dieNum][column][topY];
+                if(topY == 1) {
+                	topY ++; 
+                }else {
+                	topY--;
+                }
+                
+            }
+
+            return site;
+        }
+    }
+    public AbstractSite getVirtualSite(int dieNum, int column, int row) {
+        return this.getVirtualSite(dieNum, column, row, false);
+    }
+    public AbstractSite getVirtualSite(int dieNum, int column, int row, boolean allowNull) {
+        if(allowNull) {
+            return this.virtualSites[dieNum][column][row];
 
         } else {
             AbstractSite site = null;
             int topY = row;
             while(site == null) {
-                site = this.sites[column][topY];
+                site = this.virtualSites[dieNum][column][topY];
                 topY--;
             }
 
@@ -442,51 +548,83 @@ public class Circuit {
 
     public int getCapacity(BlockType blockType) {
         BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
+        BlockType sllDummy = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
+        BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
         if(blockType.equals(ioType)) {
-            return (this.height + this.width) * 2;
+        	//Multi-die architecture has 2 columns and one row
+            return ((2*(this.height-1)) + this.width-1);
 
-        } else {
-            int numColumns = this.columnsPerBlockType.get(blockType).size();
-            int columnHeight = this.height / blockType.getHeight();
+        } else if(blockType.equals(sllDummy)) {
+        	return this.width;
+        }else if(blockType.equals(emptyType)) {
+        	return (this.width + this.height)*2;
+        }else{
+	            int numColumns = this.columnsPerBlockType.get(blockType).size();
+	            int columnHeight = this.height / blockType.getHeight();
 
-            return numColumns * columnHeight;
+	            return numColumns * columnHeight;
         }
     }
-    public List<AbstractSite> getSites(BlockType blockType) {
+
+
+    public List<AbstractSite> getSites(BlockType blockType, int dieNumber) {
         BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
-        List<AbstractSite> sites;
-
-        if(blockType.equals(ioType)) {
-            int ioCapacity = this.architecture.getIoCapacity();
-            sites = new ArrayList<AbstractSite>((this.width + this.height) * 2 * ioCapacity);
-
-            for(int n = 0; n < ioCapacity; n++) {
-                for(int i = 1; i < this.height + 1; i++) {
-                    sites.add(this.sites[0][i]);
-                    sites.add(this.sites[this.width + 1][i]);
+        BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
+        List<AbstractSite> sites = null;
+        int ioCapacity = this.architecture.getIoCapacity();
+        if (blockType.equals(ioType)) {
+            int totalSites = (this.width - 1 * (this.height - 1)) * ioCapacity;
+            sites = new ArrayList<>(totalSites);
+            for (int n = 0; n < ioCapacity; n++) {
+                for (int i = 1; i < this.height - 1; i++) {
+                    sites.add(this.sites[dieNumber][1][i]);
+                    sites.add(this.sites[dieNumber][this.width - 2][i]);
                 }
-
-                for(int i = 1; i < this.width + 1; i++) {
-                    sites.add(this.sites[i][0]);
-                    sites.add(this.sites[i][this.height + 1]);
+                for (int i = 1; i < this.width - 1; i++) {
+                    if (dieNumber == 0) {
+                        sites.add(this.sites[dieNumber][i][1]);
+                    } else {
+                        sites.add(this.sites[dieNumber][i][this.height - 2]);
+                    }
                 }
             }
-
-        } else {
+        } else if(!blockType.equals(emptyType)) {
             List<Integer> columns = this.columnsPerBlockType.get(blockType);
             int blockHeight = blockType.getHeight();
-            sites = new ArrayList<AbstractSite>(columns.size() * this.height);
+            sites = new ArrayList<>(columns.size() * (this.height - 2));
 
-            for(Integer column : columns) {
-                for(int row = 1; row < this.height + 2 - blockHeight; row += blockHeight) {
-                    sites.add(this.sites[column][row]);
+            for (Integer column : columns) {
+                for (int row = 2 ; row < this.height - 2 - blockHeight; row += blockHeight) {
+
+                        sites.add(this.sites[dieNumber][column][row]);
+
                 }
             }
         }
 
-        return sites;
-    }
 
+        return sites; 
+    }
+    
+    public List<AbstractSite> getVirtualSites(BlockType blockType, int dieNumber) {
+    	BlockType slltype = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
+        List<AbstractSite> virtualSites = new ArrayList<AbstractSite>((this.width-1) * this.sllRows);
+        int blockHeight = 1; 
+        if(blockType.equals(slltype)){
+        	for(int column = 1; column < this.width - 1; column++) {
+   	         int startRow = (dieNumber == 0) ? this.height - 1 - this.sllRows : 0;
+   	         int endRow = (dieNumber == 0) ? this.height - 1 : this.sllRows;
+   	
+   	         for (int row = startRow; row < endRow; row++) {
+         		if(!(this.virtualSites[dieNumber][column][row] == null)) {
+        			virtualSites.add(this.virtualSites[dieNumber][column][row]);
+        		}
+   	         }
+        	}
+        }
+
+		return virtualSites;
+    }
     public List<Integer> getColumnsPerBlockType(BlockType blockType) {
         return this.columnsPerBlockType.get(blockType);
     }
@@ -524,7 +662,7 @@ public class Circuit {
         int randomRow = 1 + blockHeight * (minRowIndex + random.nextInt(maxRowIndex + 1 - minRowIndex));
 
         // Return the site found at the random row and column
-        return this.getSite(randomColumn, randomRow, false);
+        return this.getSite(this.dienum, randomColumn, randomRow, false);
     }
 
 
@@ -544,4 +682,54 @@ public class Circuit {
     public String toString() {
         return this.getName();
     }
+    
+    public void numOutputPins() {
+    	int numOutPins = 0;
+    	
+    	for(BlockType ioType:BlockType.getBlockTypes(BlockCategory.IO)){
+    		for(AbstractBlock block:this.getBlocks(ioType)) {
+    			for(AbstractPin pin : block.getOutputPins()) {
+    				if(pin.getNumSinks()>=1) {
+    					numOutPins++;
+    				}
+                }
+    		}
+        }
+    	System.out.print("\nThe number of input pins is " + numOutPins);
+    	
+    	for(BlockType clbType:BlockType.getBlockTypes(BlockCategory.CLB)){
+    		for(AbstractBlock block:this.getBlocks(clbType)) {
+    			for(AbstractPin pin : block.getOutputPins()) {
+    				if(pin.getNumSinks()>=1) {
+    					numOutPins++;
+    				}
+                }
+    		}
+        }
+    	System.out.print("\nThe number of CLB output pins is " + numOutPins);
+    	
+    	for(BlockType hardType:BlockType.getBlockTypes(BlockCategory.HARDBLOCK)){
+    		for(AbstractBlock block:this.getBlocks(hardType)) {
+    			for(AbstractPin pin : block.getOutputPins()) {
+    				if(pin.getNumSinks()>=1) {
+    					numOutPins++;
+    				}
+                }
+    		}
+        }
+    	System.out.print("\nThe number of hard block output pins is " + numOutPins);
+    	
+    	for(BlockType sllType:BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
+    		for(AbstractBlock block:this.getBlocks(sllType)) {
+    			for(AbstractPin pin : block.getOutputPins()) {
+    				if(pin.getNumSinks()>=1) {
+    					numOutPins++;
+    				}
+                }
+    		}
+        }
+    	System.out.print("\nThe number of slltype block output pins is " + numOutPins +"\n");
+
+    }
+
 }

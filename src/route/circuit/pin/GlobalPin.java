@@ -8,6 +8,8 @@ public class GlobalPin extends AbstractPin {
 	private int id;
 	private String netName;
 
+	private Boolean globalNetPin = false;
+	private Boolean sllGlobalPin = false;
     public GlobalPin(GlobalBlock owner, PortType portType, int index) {
         super(owner, portType, index);
         
@@ -29,5 +31,21 @@ public class GlobalPin extends AbstractPin {
     @Override
     public int hashCode() {
     	return this.id;
+    }
+    
+    public void setSLLGlobalPin() {
+    	this.sllGlobalPin = true;
+    }
+    
+    public boolean getSLLGlobalPin() {
+    	return this.sllGlobalPin;
+    }
+    
+    public void setGlobalNetPin() {
+    	this.globalNetPin = true;
+    }
+    
+    public boolean getGlobalNetPin() {
+    	return this.globalNetPin;
     }
 }

@@ -15,11 +15,12 @@ public class Pin implements Comparable<Pin>{
 	private Block parentBlock;
 	private ArrayList<Conn> inputConnections;
 	private ArrayList<Conn> outputConnections;
+	public int hopCounter = 0;
 	
 	private static int nextId = 0;
 	
 	//Dijkstra
-	private int delay = Integer.MAX_VALUE;//ps
+	private int delay = Integer.MAX_VALUE;
 	private Pin previous = null;
 	private final Map<Pin,Integer> neighbours = new HashMap<>();
 

@@ -4,12 +4,14 @@ import place.circuit.Circuit;
 import place.circuit.architecture.BlockCategory;
 import place.circuit.architecture.BlockType;
 import place.circuit.block.AbstractBlock;
+import place.circuit.block.AbstractSite;
 import place.circuit.block.GlobalBlock;
 import place.circuit.block.IOSite;
 import place.circuit.block.Macro;
 import place.circuit.block.Site;
 import place.circuit.exceptions.PlacementException;
 import place.circuit.timing.TimingEdge;
+import place.circuit.timing.TimingGraphSLL;
 import place.circuit.timing.TimingNode;
 import place.circuit.timing.TimingNode.Position;
 import place.interfaces.Logger;
@@ -25,49 +27,80 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import pack.util.ErrorLog;
+import pack.util.Output;
 
-public abstract class AnalyticalAndGradientPlacer extends Placer {
+public abstract class AnalyticalAndGradientPlacer extends Placer{
 
-    protected List<BlockType> blockTypes;
-    protected List<Integer> blockTypeIndexStarts;
-    protected final Map<GlobalBlock, NetBlock> netBlocks = new HashMap<>();
-
-    protected int numIOBlocks, numMovableBlocks;
-
-    protected double[] linearX, linearY;
-    protected double[] legalX, legalY;
-    protected double[] bestLinearX, bestLinearY;
-    protected double[] bestLegalX, bestLegalY;
-    protected int[] leafNode;
-    protected int[] heights;
+    protected List<List<BlockType>> blockTypes;
+    protected List<List<Integer>> blockTypeIndexStarts;
+    protected final Map<Integer,Map<GlobalBlock, NetBlock>> netBlocks;
+    protected int[] numIOBlocks, numMovableBlocks;
+    protected int[] numSLLBlocks;
+    protected StringBuilder localOutput = new StringBuilder();
+    protected boolean Global_fix;
+    protected boolean Seperate_fix;
+    protected int syncStep;
+    protected TimingGraphSLL timingGraphSLL;
+    
+    protected List<double[]> linearX, linearY;
+    protected List<double[]> legalX, legalY;
+    protected List<double[]> bestLinearX, bestLinearY;
+    protected List<double[]> bestLegalX, bestLegalY;
+    protected List<int[]> leafNode;
+    protected List<int[]> heights;
 
     private double criticalityLearningRate;
 
-    protected double linearCost;
-    protected double legalCost;
-    protected double timingCost;
+    protected double[] linearCost;
+    protected double[] legalCost;
+    protected double[] timingCost;
     
-    protected double currentCost, bestCost;
+    protected double[] currentCost, bestCost;
+    protected Map<String,List<Integer>> SLLcounter;
+    protected Map<String,Integer> sLLNodeList;
 
-    private boolean[] hasNets;
-    protected int numRealNets, numRealConn;
-    protected List<Net> nets;
-    protected List<TimingNet> timingNets;
+    private List<boolean[]> hasNets;
+    private boolean[] hasNetstemp;
+    protected int[] numRealNets, numRealConn;
+    protected List<Net>[] nets;
+    protected List<TimingNet>[] timingNets;
 
-    private boolean[] solveSeparate;
+    private boolean[][] solveSeparate;
     
-    private final boolean hasHierarchyInformation;
+    private boolean[] dieSync;
+    
+    protected boolean hasHierarchyInformation;
 
     private static final String
-        O_CRIT_LEARNING_RATE = "crit learning rate";
+        O_CRIT_LEARNING_RATE = "crit learning rate",
+    	O_SYNC_STEP = "Synchronisation step",
+    	O_FIX_GLOBAL = "fix global",
+    	O_FIX_SEPERATE = "fix Seperate";
+    	
 
     public static void initOptions(Options options) {
         options.add(
                 O_CRIT_LEARNING_RATE,
                 "criticality learning rate of the critical connections in sparce placement",
                 new Double(0.7));
+        options.add(
+        		O_SYNC_STEP,
+                "Synchronisation step for multithreading",
+                new Integer(1));
+        options.add(O_FIX_GLOBAL,
+        		"Fixed SLL blocks in global",
+        		Boolean.FALSE);
+        options.add(O_FIX_SEPERATE,
+        		"Fixed SLL blocks in seperate",
+        		Boolean.FALSE);
     }
 
     protected final static String
@@ -79,20 +112,28 @@ public abstract class AnalyticalAndGradientPlacer extends Placer {
         T_LEGALIZE = "legalize";
 
 
-    public AnalyticalAndGradientPlacer(Circuit circuit, Options options, Random random, Logger logger, PlacementVisualizer visualizer) {
-        super(circuit, options, random, logger, visualizer);
+    public AnalyticalAndGradientPlacer(Circuit[] circuitDie, Options options, Random random, Logger logger, 
+    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSLL) {	
+		super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSLL);
 
+		this.Global_fix = options.getBoolean(O_FIX_GLOBAL);
+		this.Seperate_fix = options.getBoolean(O_FIX_SEPERATE);
         this.criticalityLearningRate = options.getDouble(O_CRIT_LEARNING_RATE);
+        this.syncStep = options.getInteger(O_SYNC_STEP);
+        this.hasHierarchyInformation = false;
+        this.netBlocks = new HashMap<>();
+        this.SLLcounter = new HashMap<>();
+        this.sLLNodeList = new HashMap<>();
+        this.timingGraphSLL = timingGraphSLL;
+        this.timingGraphSLL.recalculateSystemTimingGraph();
         
-        //Check if a hierarchy input file is available.
-        //If the file is available, then each node should have a hierarchy leaf node.
-        //If the file is not available, then no hierarchy information is used in Liquid.
         boolean flag = false;
-        for(GlobalBlock block:this.circuit.getGlobalBlocks()){
+        //Since the hierarchy file will exist for both the dies, it is fine to consider only one die for evaluation.
+        for(GlobalBlock block:this.circuitDie[0].getGlobalBlocks()){
         	if(block.hasLeafNode()) flag = true;
         }
         if(flag){
-            for(GlobalBlock block:this.circuit.getGlobalBlocks()){
+            for(GlobalBlock block:this.circuitDie[0].getGlobalBlocks()){
             	if(!block.hasLeafNode()){
             		ErrorLog.print("Liquid includes hierarchy information but global block " + block + " has no leaf node");
             	}
@@ -101,257 +142,384 @@ public abstract class AnalyticalAndGradientPlacer extends Placer {
         }else{
         	this.hasHierarchyInformation = false;
         }
+        
+
     }
 
     protected abstract boolean isTimingDriven();
 
-    protected abstract void initializeIteration(int iteration);
-    protected abstract void solveLinear(int iteration);
-    protected abstract void solveLegal(boolean isLastIteration);
-    protected abstract void solveLinear(BlockType category, int iteration);
-    protected abstract void solveLegal(BlockType category, boolean isLastIteration);
-    protected abstract void calculateCost(int iteration);
+    protected abstract void initializeIteration(int iteration, int dieCounter);
+    protected abstract void solveLinear(int iteration, int dieCounter);
+    protected abstract void solveLegal(int iteration, boolean isLastIteration, int dieCounter);
+    protected abstract void solveLinear(BlockType category, int iteration, int dieCounter);
+    protected abstract void solveLegal(BlockType category, boolean isLastIteration,int dieCounter);
+    protected abstract void calculateCost(int iteration, int dieCount);
     protected abstract boolean stopCondition(int iteration);
     protected abstract int numIterations();
-    protected abstract void printLegalizationRuntime();
+    protected abstract void printLegalizationRuntime(int dieCounter);
+    protected abstract void fixSLLblocks(BlockType category, int SLLrows);
+    protected abstract void synchroniseSLLblocks(StringBuilder localOutput);
+    protected abstract StringBuilder printStatistics(int iteration, double time, int dieCounter);
 
-    protected abstract void printStatistics(int iteration, double time);
 
 
-    @Override
+    @SuppressWarnings("unchecked")
+	@Override
     public void initializeData() {
+    	String initialiseData = "Placer Initialisation";
+    	this.startSystemTimer(initialiseData);
+        int dieCount = 0;
 
-        this.startTimer(T_INITIALIZE_DATA);
-
-        // Count the number of blocks
-        // A macro counts as 1 block
-        int numBlocks = 0;
-        for(BlockType blockType : this.circuit.getGlobalBlockTypes()) {
-            numBlocks += this.circuit.getBlocks(blockType).size();
-        }
-        for(Macro macro : this.circuit.getMacros()) {
-            numBlocks -= macro.getNumBlocks() - 1;
-        }
-
-        // Make a list of all block types, with IO blocks first
         this.blockTypes = new ArrayList<>();
-
-        BlockType ioBlockType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
-        this.blockTypes.add(ioBlockType);
-
-        for(BlockType blockType : this.circuit.getGlobalBlockTypes()) {
-            if(!blockType.equals(ioBlockType)) {
-                this.blockTypes.add(blockType);
-            }
-        }
-
-        this.linearCost = Double.NaN;
-        this.legalCost = Double.NaN;
-        this.timingCost = Double.NaN;
-        
-        this.currentCost = Double.MAX_VALUE;
-        this.bestCost = Double.MAX_VALUE;
-
-        // Add all global blocks, in the order of 'blockTypes'
-        this.linearX = new double[numBlocks];
-        this.linearY = new double[numBlocks];
-        this.legalX = new double[numBlocks];
-        this.legalY = new double[numBlocks];
-        this.bestLinearX = new double[numBlocks];
-        this.bestLinearY = new double[numBlocks];
-        this.bestLegalX = new double[numBlocks];
-        this.bestLegalY = new double[numBlocks];
-        this.leafNode = new int[numBlocks];
-        this.hasNets = new boolean[numBlocks];
-        
-        //If the value of leafNode is equal to -1 then the node has no hierarchy leaf node
-        Arrays.fill(this.leafNode, -1);
-
-        this.heights = new int[numBlocks];
-        Arrays.fill(this.heights, 1);
-
         this.blockTypeIndexStarts = new ArrayList<>();
-        this.blockTypeIndexStarts.add(0);
-        List<GlobalBlock> macroBlocks = new ArrayList<>();
-
-        int blockCounter = 0;
-        for(BlockType blockType : this.circuit.getGlobalBlockTypes()) {
-            for(AbstractBlock abstractBlock : this.circuit.getBlocks(blockType)) {
-                GlobalBlock block = (GlobalBlock) abstractBlock;
-
-                // Blocks that are the first block of a macro (or that aren't
-                // in a macro) should get a movable position.
-                if(!block.isInMacro() || block.getMacroOffsetY() == 0) {
-                    int column = block.getColumn();
-                    int row = block.getRow();
-
-                    int height = block.isInMacro() ? block.getMacro().getHeight() : 1;
-                    // The offset is measured in half blocks from the center of the macro
-                    // For the legal position of macro's with an even number of blocks,
-                    // the position of the macro is rounded down
-                    float offset = (1 - height) / 2f;
-
-                    this.linearX[blockCounter] = column;
-                    this.linearY[blockCounter] = row - offset;
-                    this.legalX[blockCounter] = column;
-                    this.legalY[blockCounter] = row - offset;
-                    this.heights[blockCounter] = height;
-
-                    if(this.hasHierarchyInformation){
-                    	this.leafNode[blockCounter] = block.getLeafNode().getIndex();
-                    }
-
-                    this.netBlocks.put(block, new NetBlock(blockCounter, offset, blockType));
-
-                    blockCounter++;
-
-                // The position of other blocks will be calculated
-                // using the macro source.
-                } else {
-                    macroBlocks.add(block);
-                }
-            }
-
-            this.blockTypeIndexStarts.add(blockCounter);
-        }
-
-        for(GlobalBlock block : macroBlocks) {
-            GlobalBlock macroSource = block.getMacro().getBlock(0);
-            int sourceIndex = this.netBlocks.get(macroSource).blockIndex;
-            int macroHeight = block.getMacro().getHeight();
-            int offset = (1 - macroHeight) / 2 + block.getMacroOffsetY();
-
-            this.netBlocks.put(block, new NetBlock(sourceIndex, offset, macroSource.getType()));
-            blockCounter++;
-        }
-
-        this.numIOBlocks = this.blockTypeIndexStarts.get(1);
-
-
-        // Add all nets
-        // A net is simply a list of unique block indexes
-        // If the algorithm is timing driven, we also store all the blocks in
-        // a net (duplicates are allowed) and the corresponding timing edge
-        this.nets = new ArrayList<Net>();
-        this.timingNets = new ArrayList<TimingNet>();
-
-
-        /* For each global output pin, build the net that has that pin as
-         * its source. We build the following data structures:
-         *   - uniqueBlockIndexes: a list of the global blocks in the net
-         *     in no particular order. Duplicates are removed.
-         *   - blockIndexes: a list of the blocks in the net. Duplicates
-         *     are allowed if a block is connected multiple times to the
-         *     same net. blockIndexes[0] is the net source.
-         *   - timingEdges: the timing edges that correspond to the blocks
-         *     in blockIndexes. The edge at timingEdges[i] corresponds to
-         *     the block at blockIndexes[i + 1].
-         */
-
-        // Loop through all leaf blocks
-        for(GlobalBlock sourceGlobalBlock : this.circuit.getGlobalBlocks()) {
-            NetBlock sourceBlock = this.netBlocks.get(sourceGlobalBlock);
-
-            for(TimingNode timingNode : sourceGlobalBlock.getTimingNodes()) {
-                if(timingNode.getPosition() != Position.LEAF) {
-                    this.addNet(sourceBlock, timingNode);
-                }
-            }
-        }
-
-        this.numRealNets = this.nets.size();
-
-        this.numRealConn = 0;
-        for(Net net:this.nets){
-        	this.numRealConn += net.blocks.length - 1;
-        }
-
-        for(NetBlock block : this.netBlocks.values()) {
-            if(!this.hasNets[block.blockIndex]) {
-                this.addDummyNet(block);
-            }
-        }
         
-        //Separate solving dense designs
-        if(this.circuit.ratioUsedCLB() > 0.8) {
-            int numIterations = this.numIterations();
-            this.solveSeparate = new boolean[numIterations];
-            double nextFunctionValue = 0;
-
-            double priority = 0.75, fequency = 0.3, min = 5;
+        
+        this.linearCost = new double[this.TotalDies];
+        this.legalCost = new double[this.TotalDies];
+        this.timingCost = new double[this.TotalDies];
+        this.currentCost = new double[this.TotalDies];
+        this.bestCost = new double[this.TotalDies];
+        this.numIOBlocks = new int[this.TotalDies];
+        
+        this.nets = new List[this.TotalDies];
+        this.timingNets = new List[this.TotalDies];;
+        this.numRealNets = new int[this.TotalDies];
+        this.numRealConn = new int[this.TotalDies];
+        int numIterations = this.numIterations();
+        this.solveSeparate = new boolean[this.TotalDies][numIterations];
+        this.dieSync = new boolean [numIterations];
+        
+        this.linearX = new ArrayList<double[]>();
+        this.linearY = new ArrayList<double[]>();
+        this.legalX = new ArrayList<double[]>();
+        this.legalY = new ArrayList<double[]>();
+        this.bestLinearX = new ArrayList<double[]>();
+        this.bestLinearY = new ArrayList<double[]>();
+        this.bestLegalX = new ArrayList<double[]>();
+        this.bestLegalY = new ArrayList<double[]>();
+        this.leafNode = new ArrayList<int[]>();
+        this.hasNets = new ArrayList<boolean[]>();
+        this.heights = new ArrayList<int[]>();
+        
+        while(dieCount < this.TotalDies) {
+        	 this.startTimer(T_INITIALIZE_DATA, dieCount);
+        	int numBlocks = 0;   //internal variables dont need to be 2D
+        	this.blockTypes.add(new ArrayList<>());
+        	this.blockTypeIndexStarts.add(new ArrayList<>());
+        
+        	this.netBlocks.put(dieCount, new HashMap<>());
             
-        	StringBuilder recalculationsString = new StringBuilder();
-            for(int i = 0; i < numIterations; i++) {
-                double functionValue = Math.pow((1. * i) / numIterations, 1. / priority);
-                if(functionValue >= nextFunctionValue) {
-                    nextFunctionValue += 1.0 / (fequency * numIterations);
-                    if(i > min){
-                    	this.solveSeparate[i] = true;
-                    	recalculationsString.append("|");
-                    }else{
-                    	this.solveSeparate[i] = false;
-                    	recalculationsString.append(".");
-                    }
-                } else {
-                	this.solveSeparate[i] = false;
-                    recalculationsString.append(".");
+            
+        	for(BlockType blockType : this.circuitDie[dieCount].getGlobalBlockTypes()) {
+                numBlocks += this.circuitDie[dieCount].getBlocks(blockType).size();
+            }
+            for(Macro macro : this.circuitDie[dieCount].getMacros()) {
+                numBlocks -= macro.getNumBlocks() - 1;
+            }
+            
+            BlockType ioBlockType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
+            BlockType sllBlockType = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
+            this.blockTypes.get(dieCount).add(ioBlockType);
+            for(BlockType blockType : this.circuitDie[dieCount].getGlobalBlockTypes()) {
+                if(!blockType.equals(ioBlockType)) {
+                	this.blockTypes.get(dieCount).add(blockType);
                 }
             }
-            System.out.println("Solve separate: " + recalculationsString + "\n");
-        //Separate solving sparse designs
-        } else {
-            int numIterations = this.numIterations();
-            this.solveSeparate = new boolean[numIterations];
+            
+            this.linearCost[dieCount] = Double.NaN;
+            this.legalCost[dieCount] = Double.NaN;
+            this.timingCost[dieCount] = Double.NaN;
+            
+            this.currentCost[dieCount] = Double.MAX_VALUE;
+            this.bestCost[dieCount] = Double.MAX_VALUE;
 
-            StringBuilder recalculationsString = new StringBuilder();
-            for(int i = 0; i < numIterations; i++) {
-            	if(i%2 == 1 || i == numIterations - 1){
-            		this.solveSeparate[i] = true;
-            		recalculationsString.append("|");
-            	}else{
-            		this.solveSeparate[i] = false;
-            		recalculationsString.append(".");
-            	}
+            // Add all global blocks, in the order of 'blockTypes'
+            double [] linearXtemp = new double[numBlocks];
+            double [] linearYtemp = new double[numBlocks];
+            double [] legalXtemp = new double[numBlocks];
+            double [] legalYtemp = new double[numBlocks];
+            double [] bestLinearXtemp = new double[numBlocks];
+            double [] bestLinearYtemp = new double[numBlocks];
+            double [] bestLegalXtemp = new double[numBlocks];
+            double [] bestLegalYtemp = new double[numBlocks];
+            int [] leafNodetemp = new int[numBlocks];
+            this.hasNetstemp = new boolean[numBlocks];
+           
+            //If the value of leafNode is equal to -1 then the node has no hierarchy leaf node
+            Arrays.fill(leafNodetemp, -1);
+
+            
+            int [] tempHeight = new int[numBlocks];
+            Arrays.fill(tempHeight, 1);
+
+            
+            this.blockTypeIndexStarts.get(dieCount).add(0);
+            List<GlobalBlock> macroBlocks = new ArrayList<>();
+           
+            
+            
+            int blockCounter = 0;
+            for(BlockType blockType : this.circuitDie[dieCount].getGlobalBlockTypes()) {
+                for(AbstractBlock abstractBlock : this.circuitDie[dieCount].getBlocks(blockType)) {
+                    GlobalBlock block = (GlobalBlock) abstractBlock;
+                    // Blocks that are the first block of a macro (or that aren't
+                    // in a macro) should get a movable position.
+                    if(!block.isInMacro() || block.getMacroOffsetY() == 0) {
+                        int column = block.getColumn();
+                        int row = block.getRow();
+                      
+                        int height = block.isInMacro() ? block.getMacro().getHeight() : 1;
+                        // The offset is measured in half blocks from the center of the macro
+                        // For the legal position of macro's with an even number of blocks,
+                        // the position of the macro is rounded down
+                        float offset = (1 - height) / 2f;
+                        linearXtemp[blockCounter] = column;
+                        linearYtemp[blockCounter] = row - offset;
+                        legalXtemp[blockCounter] = column;
+                        legalYtemp[blockCounter] = row - offset;
+                        tempHeight[blockCounter] = height;
+
+                        if(this.hasHierarchyInformation){
+                        	leafNodetemp[blockCounter] = block.getLeafNode().getIndex();
+                        }
+                      
+                        this.netBlocks.get(dieCount).put(block, new NetBlock(blockCounter, offset, blockType));
+                        
+                        if(block.getType().equals(sllBlockType)) {
+                        	String blockname = block.getName();
+                        	
+                        	if(this.SLLcounter.get(blockname) == null) {
+                        		this.SLLcounter.put(blockname, new ArrayList<Integer>());
+                        	}
+                        	this.SLLcounter.get(blockname).add(blockCounter);
+ 
+                        }
+                        
+                        
+                        blockCounter++;
+                    // The position of other blocks will be calculated
+                    // using the macro source.
+                    } else {
+                        macroBlocks.add(block);
+                    }
+
+                }
+                
+                this.blockTypeIndexStarts.get(dieCount).add(blockCounter);
             }
-            this.logger.println("Solve separate: " + recalculationsString + "\n");
+            
+            this.heights.add(tempHeight);
+            this.leafNode.add(leafNodetemp);
+            this.linearX.add(linearXtemp);
+            this.linearY.add(linearYtemp);
+            this.legalX.add(legalXtemp);
+            this.legalY.add(legalYtemp);
+            this.bestLinearX.add(bestLinearXtemp);
+            this.bestLinearY.add(bestLinearYtemp);
+            this.bestLegalX.add(bestLegalXtemp);
+            this.bestLegalY.add(bestLegalYtemp);
+            this.hasNets.add(this.hasNetstemp);
+
+            for(GlobalBlock block : macroBlocks) {
+                GlobalBlock macroSource = block.getMacro().getBlock(0);
+                int sourceIndex = this.netBlocks.get(dieCount).get(macroSource).blockIndex;
+                int macroHeight = block.getMacro().getHeight();
+                int offset = (1 - macroHeight) / 2 + block.getMacroOffsetY();
+
+                this.netBlocks.get(dieCount).put(block, new NetBlock(sourceIndex, offset, macroSource.getType()));
+                blockCounter++;
+            }
+
+            this.numIOBlocks[dieCount] = this.blockTypeIndexStarts.get(dieCount).get(1);
+            // Add all nets
+            // A net is simply a list of unique block indexes
+            // If the algorithm is timing driven, we also store all the blocks in
+            // a net (duplicates are allowed) and the corresponding timing edge
+            this.nets[dieCount] = new ArrayList<Net>(); 
+            this.timingNets[dieCount] = new ArrayList<TimingNet>();
+
+
+            /* For each global output pin, build the net that has that pin as
+             * its source. We build the following data structures:
+             *   - uniqueBlockIndexes: a list of the global blocks in the net
+             *     in no particular order. Duplicates are removed.
+             *   - blockIndexes: a list of the blocks in the net. Duplicates
+             *     are allowed if a block is connected multiple times to the
+             *     same net. blockIndexes[0] is the net source.
+             *   - timingEdges: the timing edges that correspond to the blocks
+             *     in blockIndexes. The edge at timingEdges[i] corresponds to
+             *     the block at blockIndexes[i + 1].
+             */
+
+            // Loop through all leaf blocks //Timing nodes are only the output pins
+            // Get all the blocks which act as the source to a net and then add the net between the block and its sink. the Sink can exist in the block
+            // if its an intermediate block
+            
+            for(GlobalBlock sourceGlobalBlock : this.circuitDie[dieCount].getGlobalBlocks()) {
+            	
+                NetBlock sourceBlock = this.netBlocks.get(dieCount).get(sourceGlobalBlock);
+                for(TimingNode timingNode : sourceGlobalBlock.getTimingNodes()) {
+                    if(timingNode.getPosition() != Position.LEAF) {
+                        this.addNet(sourceBlock, timingNode, dieCount);
+                    }
+               }
+            }
+            this.hasNets.set(dieCount, this.hasNetstemp);
+            
+           // 
+            this.numRealNets[dieCount] = this.nets[dieCount].size();
+            System.out.print("\nThe number of real nets for die " + dieCount + " is " + this.numRealNets[dieCount] + "\n");
+            this.numRealConn[dieCount] = 0;
+            for(Net net:this.nets[dieCount]){
+            	this.numRealConn[dieCount] += net.blocks.length - 1;
+            }
+            
+            for(NetBlock block : this.netBlocks.get(dieCount).values()) {
+                if(!this.hasNets.get(dieCount)[block.blockIndex]) {
+                   this.addDummyNet(block,dieCount);
+                }
+            }
+            
+            System.out.print("\nThe number of total nets for die " + dieCount + " is " + this.nets[dieCount].size() + "\n");
+
+            double averageCLBusuage = (this.circuitDie[0].ratioUsedCLB() + this.circuitDie[1].ratioUsedCLB())/2;
+            Arrays.fill(this.dieSync, false);
+
+            int counter = this.syncStep;
+            if(averageCLBusuage > 0.8) {  
+
+                double nextFunctionValue = 0;
+
+                double priority = 0.75, fequency = 0.3, min = 5;
+                
+            	StringBuilder recalculationsString = new StringBuilder();
+                for(int i = 0; i < numIterations; i++) {
+                    double functionValue = Math.pow((1. * i) / numIterations, 1. / priority);
+                    if(functionValue >= nextFunctionValue) {
+                        nextFunctionValue += 1.0 / (fequency * numIterations);
+                        if(i > min){
+                        	this.solveSeparate[dieCount][i] = true;
+
+                        	recalculationsString.append("|");
+                        }else{
+                        	this.solveSeparate[dieCount][i] = false;
+
+                        	recalculationsString.append(".");
+                        }
+                    } else {
+                    	this.solveSeparate[dieCount][i] = false;
+
+                        recalculationsString.append(".");
+                    }
+                    if(!this.Seperate_fix) {
+                        if((i%2==0) ) {
+                          	 if ((i == 2 || counter == 0) && (i>0)) {
+                          		this.dieSync[i] =true;
+                           	counter = this.syncStep - 1;
+                          	 }else {
+                          		counter--;
+                          	}
+                          }else if(i%2==1) {
+                        	  if(!this.Global_fix) {
+                        		  this.dieSync[i] = true;
+                        	  }
+                          }
+                    }else if(!this.Global_fix) {
+                    	 this.dieSync[i] = true;
+                    }
+                    
+                    
+                }
+                System.out.println("Solve separate: " + recalculationsString + " for die " + dieCount +"\n");
+            //Separate solving sparse designs
+                
+            //Solves seperately for odd / last iteration.
+            } else {
+
+
+                StringBuilder recalculationsString = new StringBuilder();
+                for(int i = 0; i < numIterations; i++) {
+                	if(i%2 == 1 || i == numIterations - 1){
+                		this.solveSeparate[dieCount][i] = true;
+
+                		recalculationsString.append("|");
+                    	  if(!this.Global_fix) {
+                    		  this.dieSync[i] = true;
+                    	  }
+                		
+                	}else{
+                		this.solveSeparate[dieCount][i] = false;
+                        if(!this.Seperate_fix) {
+                            if((i%2==0) ) {
+                              	 if ((i == 2 || counter == 0) && (i>0)) {
+                              		this.dieSync[i] =true;
+                               	counter = this.syncStep - 1;
+                              	 }else {
+                              		counter--;
+                              	}
+                              }else if(i%2==1) {
+                            	  if(!this.Global_fix) {
+                            		  this.dieSync[i] = true;
+                            	  }
+                              }
+                        }
+                		recalculationsString.append(".");
+                	}
+                }
+                this.logger.println("\nSolve separate: " + recalculationsString + "\n");
+            }
+
+            this.stopTimer(T_INITIALIZE_DATA, dieCount);
+            
+            dieCount++;
         }
 
         
-        this.stopTimer(T_INITIALIZE_DATA);
+       this.stopandPrintSystemTimer(initialiseData);
     }
     
-    private void addDummyNet(NetBlock sourceBlock) {
+    private void addDummyNet(NetBlock sourceBlock, int dieCount) {
         // These dummy nets are needed for the analytical
         // placer. If they are not added, diagonal elements
         // exist in the matrix that are equal to 0, which
         // makes the matrix unsolvable.
         Net net = new Net(sourceBlock);
-        this.nets.add(net);
+        this.nets[dieCount].add(net);
     }
 
-    private void addNet(NetBlock sourceBlock, TimingNode sourceNode) {
+    private void addNet(NetBlock sourceBlock, TimingNode sourceNode, int dieCount) {
+    	boolean isSLLEnabled = false;
         int numSinks = sourceNode.getNumSinks();
+        GlobalBlock tempBlock = sourceNode.getGlobalBlock();
+ 
         TimingNet timingNet = new TimingNet(sourceBlock, numSinks);
+        if(tempBlock.isSLLDummy()) {
+        	isSLLEnabled = true;
+        }
 
-        boolean allFixed = this.isFixed(sourceBlock.blockIndex);
-
+        boolean allFixed = this.isFixed(sourceBlock.blockIndex, dieCount);;
         for(int sinkIndex = 0; sinkIndex < numSinks; sinkIndex++) {
             GlobalBlock sinkGlobalBlock = sourceNode.getSinkEdge(sinkIndex).getSink().getGlobalBlock();
-            NetBlock sinkBlock = this.netBlocks.get(sinkGlobalBlock);
-
+            if(sinkGlobalBlock.isSLLDummy()) {
+            	isSLLEnabled = true;
+            	this.sLLNodeList.put(sinkGlobalBlock.getName(), dieCount);
+            }
+            NetBlock sinkBlock = this.netBlocks.get(dieCount).get(sinkGlobalBlock);
             if(allFixed) {
-                allFixed = this.isFixed(sinkBlock.blockIndex);
+                allFixed = this.isFixed(sinkBlock.blockIndex, dieCount);
             }
 
-            TimingEdge timingEdge = sourceNode.getSinkEdge(sinkIndex);
 
-            timingNet.sinks[sinkIndex] = new TimingNetBlock(sinkBlock, timingEdge, this.criticalityLearningRate);
+            TimingEdge timingEdge = sourceNode.getSinkEdge(sinkIndex);
+            if(timingEdge != null) {
+            	timingNet.sinks[sinkIndex] = new TimingNetBlock(sinkBlock, timingEdge, this.criticalityLearningRate);
+            }
+            
         }
 
         if(allFixed) {
             return;
         }
-
         Net net = new Net(timingNet);
 
 
@@ -365,134 +533,220 @@ public abstract class AnalyticalAndGradientPlacer extends Placer {
          */
         int numUniqueBlocks = net.blocks.length;
         if(numUniqueBlocks > 1) {
-        	if(numUniqueBlocks < this.circuit.getGlobalBlocks().size() / 2) {
-        		this.nets.add(net);
-        		
-        		for(NetBlock block : net.blocks) {
-        			this.hasNets[block.blockIndex] = true;
-        		}
-        	}
+    		this.nets[dieCount].add(net);
+
+    		for(NetBlock block : net.blocks) {
+    			this.hasNetstemp[block.blockIndex] = true;
+    			}
         	if(this.isTimingDriven()) {
-        		this.timingNets.add(timingNet);
-        	}
+        		this.timingNets[dieCount].add(timingNet);
+        		}
+    	}else if(numUniqueBlocks == 1 && isSLLEnabled) {
+    		this.nets[dieCount].add(net);
+
+      		for(NetBlock block : net.blocks) {
+      			this.hasNetstemp[block.blockIndex] = true;
+      		}
+	      	if(this.isTimingDriven()) {
+	      		this.timingNets[dieCount].add(timingNet);
+	      	}
+
         }
     }
     
     @Override
     protected void doPlacement() {
-
-        int iteration = 0;
-        boolean isLastIteration = false;
-
-        while(!isLastIteration) {
-            double timerBegin = System.nanoTime();
-
-            this.initializeIteration(iteration);
-
-            if(this.solveSeparate[iteration]){
-            	for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.CLB)){
-                    this.solveLinear(blockType, iteration);
-                	this.solveLegal(blockType, isLastIteration);
-                }
-                for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.HARDBLOCK)){
-                    this.solveLinear(blockType, iteration);
-                	this.solveLegal(blockType, isLastIteration);
-                }
-                for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.IO)){
-                    this.solveLinear(blockType, iteration); //TODO REMOVE
-                	this.solveLegal(blockType, isLastIteration);
-                }
-            }else{
-            	this.solveLinear(iteration);
-            	this.solveLegal(isLastIteration);
-            }
-
-            this.calculateCost(iteration);
-
-            this.addLinearPlacement(iteration);
-            this.addLegalPlacement(iteration);
-
-            double timerEnd = System.nanoTime();
-            double time = (timerEnd - timerBegin) * 1e-9;
-            
-            this.printStatistics(iteration, time);
-            
-            isLastIteration = this.stopCondition(iteration);
-            
-            iteration++;
-        }
-        
-        //////////// Final legalization of the LABs ////////////
-		for(int i = 0; i < this.linearX.length; i++){
-			this.linearX[i] = this.bestLinearX[i];
-			this.linearY[i] = this.bestLinearY[i];
-			this.legalX[i] = this.bestLegalX[i];
-			this.legalY[i] = this.bestLegalY[i];
-		}
-    	for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.CLB)){
-        	this.solveLegal(blockType, isLastIteration);
-        }
-    	////////////////////////////////////////////////////////
+    
     	
-        this.printLegalizationRuntime();
+
+	    int iteration = 0;
+	    boolean isLastIteration = false;
+	
+		String placetimer = "Placement took";
+		this.startSystemTimer(placetimer);
+	    System.out.print("\n");
+	    while(!isLastIteration) {
+        double timerBegin = System.nanoTime();
+        if(this.dieSync[iteration]) {
+        	String synctime = "Synchronisation took";
+        	this.startSystemTimer(synctime);
+			this.synchroniseSLLblocks(this.localOutput);
+			this.timingGraphSLL.recalculateSystemTimingGraph();
+			this.localOutput.append(this.stopandPrintSystemTimerNew(synctime));
+		}
+        int dieCounter = 2;
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        for (int i = 0; i < dieCounter; i++) {  
+        	Runnable worker = new ParallelOptiLeg(iteration,isLastIteration,timerBegin,i);  
+        	executor.execute(worker);  
+	    }  
+        executor.shutdown();  
+        while (!executor.isTerminated()) {   }  
+		    isLastIteration = this.stopCondition(iteration);
+		    iteration++;
+	    }
+    	
+       this.stopandPrintSystemTimer(placetimer);
+       System.out.print(this.localOutput);
+
+       int dieCounter = 0;
+       String legaltimer = "Legalisation routine took";
+       this.startSystemTimer(legaltimer);
+       while(dieCounter < this.TotalDies) {
+            double [] linearXtemp = this.linearX.get(dieCounter);
+            double [] linearYtemp = this.linearY.get(dieCounter);
+            double [] legalXtemp = this.legalX.get(dieCounter);
+            double [] legalYtemp = this.legalY.get(dieCounter);
+
+            double [] bestLinearXtemp = this.bestLinearX.get(dieCounter);
+            double [] bestLinearYtemp = this.bestLinearY.get(dieCounter);
+            double [] bestLegalXtemp = this.bestLegalX.get(dieCounter);
+            double [] bestLegalYtemp = this.bestLegalY.get(dieCounter);
+
+    		for(int i = 0; i < linearXtemp.length; i++){
+    			linearXtemp[i] = bestLinearXtemp[i];
+    			linearYtemp[i] = bestLinearYtemp[i];
+    			legalXtemp[i] = bestLegalXtemp[i];
+    			legalYtemp[i] = bestLegalYtemp[i];
+    		}
+
+    		this.linearX.set(dieCounter, linearXtemp);
+    		this.linearY.set(dieCounter, linearYtemp);
+    		this.legalX.set(dieCounter, legalXtemp);
+    		this.legalY.set(dieCounter, legalYtemp);
+    		
+        	for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.CLB)){
+            	this.solveLegal(blockType, isLastIteration, dieCounter);
+            }
+        	dieCounter++;
+        }
         
+        this.synchroniseSLLblocks(this.localOutput);
+
         this.logger.println();
 
-        this.startTimer(T_UPDATE_CIRCUIT);
+        
         try {
+        	String circuitUpdate = "Circuit update routine took";
+        	this.startSystemTimer(circuitUpdate);
         	this.updateCircuit();
+        	this.stopandPrintSystemTimer(circuitUpdate);
         } catch(PlacementException error) {
         	this.logger.raise(error);
         }
-        this.stopTimer(T_UPDATE_CIRCUIT);
+       
+    }
+    
+    private StringBuilder diePlacement(int iteration, boolean isLastIteration,double timerBegin, int dieCounter) {
+    	 //Initialise the iterations on both the dies 
+    	this.initializeIteration(iteration, dieCounter);
+        if(this.solveSeparate[dieCounter][iteration]){
+
+        	for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.CLB)){
+	
+                this.solveLinear(blockType, iteration, dieCounter);
+            	this.solveLegal(blockType, isLastIteration, dieCounter);
+            }
+            for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.HARDBLOCK)){
+                this.solveLinear(blockType, iteration, dieCounter);
+            	this.solveLegal(blockType, isLastIteration, dieCounter);
+//
+            }
+            if(!this.Seperate_fix) {
+
+    		    for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
+    		        this.solveLinear(blockType, iteration, dieCounter); 
+    		        this.solveLegal(blockType, isLastIteration, dieCounter);
+    		    }
+            }
+
+            for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.IO)){
+                this.solveLinear(blockType, iteration, dieCounter); 
+            	this.solveLegal(blockType, isLastIteration, dieCounter);
+            }
+
+        }else if (!this.solveSeparate[dieCounter][iteration]){
+
+        	this.solveLinear(iteration,dieCounter);
+        	this.solveLegal(iteration, isLastIteration,dieCounter);
+        }  	
+        this.calculateCost(iteration,dieCounter);
+        this.addLinearPlacement(iteration,dieCounter);
+        this.addLegalPlacement(iteration,dieCounter);
         
-        //Print Critical Path Delay
-        //this.logger.println(this.circuit.getTimingGraph().criticalPathToString());
+        double timerEnd = System.nanoTime();
+        double time = (timerEnd - timerBegin) * 1e-9;
+        
+        return this.printStatistics(iteration, time, dieCounter);
+
     }
-    private void addLinearPlacement(int iteration){
-        this.visualizer.addPlacement(
+    private void addLinearPlacement(int iteration, int dieNumber){
+        this.visualizer[dieNumber].addPlacement(
                 String.format("iteration %d: linear", iteration),
-                this.netBlocks, this.linearX, this.linearY,
-                this.linearCost);
+                this.netBlocks.get(dieNumber), this.linearX.get(dieNumber), this.linearY.get(dieNumber),
+                this.linearCost[dieNumber]);
     }
-    private void addLegalPlacement(int iteration){
-        this.visualizer.addPlacement(
+    private void addLegalPlacement(int iteration, int dieNumber){
+        this.visualizer[dieNumber].addPlacement(
                 String.format("iteration %d: legal", iteration),
-                this.netBlocks, this.legalX, this.legalY,
-                this.legalCost);
+                this.netBlocks.get(dieNumber), this.legalX.get(dieNumber), this.legalY.get(dieNumber),
+                this.legalCost[dieNumber]);
     }
 
     protected void updateCircuit() throws PlacementException {
-        // Clear all previous locations
-        for(GlobalBlock block : this.netBlocks.keySet()) {
-            block.removeSite();
-        }
-
-        // Update locations
-        for(Map.Entry<GlobalBlock, NetBlock> blockEntry : this.netBlocks.entrySet()) {
-            GlobalBlock block = blockEntry.getKey();
-
-            NetBlock netBlock = blockEntry.getValue();
-            int index = netBlock.blockIndex;
-            int offset = (int) Math.ceil(netBlock.offset);
-
-            int column = (int)Math.round(this.legalX[index]);
-            int row = (int)Math.round(this.legalY[index] + offset);
-
-            if(block.getCategory() != BlockCategory.IO) {
-                Site site = (Site) this.circuit.getSite(column, row, true);
-                block.setSite(site);
-            }else{
-                IOSite site = (IOSite) this.circuit.getSite(column, row, true);
-                block.setSite(site);
+    	
+    	int dieCounter = 0; 
+    	
+    	while(dieCounter < this.TotalDies) {
+    		this.startTimer(T_UPDATE_CIRCUIT, dieCounter);
+    		double [] legalXtemp = this.legalX.get(dieCounter);
+    		double [] legalYtemp = this.legalY.get(dieCounter);
+    		
+    		// Clear all previous locations
+            for(GlobalBlock block : this.netBlocks.get(dieCounter).keySet()) {
+                block.removeSite();
             }
-        }
-        this.circuit.getTimingGraph().calculateCriticalities(true);
+            
+
+            // Update locations
+            for(Map.Entry<GlobalBlock, NetBlock> blockEntry : this.netBlocks.get(dieCounter).entrySet()) {
+            	
+                GlobalBlock block = blockEntry.getKey();
+
+                NetBlock netBlock = blockEntry.getValue();
+
+                int index = netBlock.blockIndex;
+                int offset = (int) Math.ceil(netBlock.offset);
+
+                int column = (int)Math.round(legalXtemp[index]);
+                int row = (int)Math.round(legalYtemp[index] + offset);
+
+                if(block.getCategory() != BlockCategory.IO) {
+                	if(block.getCategory() == BlockCategory.SLLDUMMY) {
+                		AbstractSite virtualSite = this.circuitDie[dieCounter].getVirtualSite(dieCounter, column, row, true);	
+                        block.setSite(virtualSite);     
+                	}else {
+	                    Site site = (Site) this.circuitDie[dieCounter].getSite(dieCounter, column, row, true);
+
+	                    block.setSite(site);    
+                	}
+                }else{
+ 
+                    IOSite site = (IOSite) this.circuitDie[dieCounter].getSite(dieCounter, column, row, true);
+                    block.setSite(site);
+                }
+            }
+            this.circuitDie[dieCounter].getTimingGraph().calculateCriticalities(true);
+            this.stopTimer(T_UPDATE_CIRCUIT, dieCounter);
+            dieCounter++;
+            
+    	}
+        
     }
 
 
-    private boolean isFixed(int blockIndex) {
-        return blockIndex < this.numIOBlocks;
+    private boolean isFixed(int blockIndex, int dieCounter) {
+        return blockIndex < this.numIOBlocks[dieCounter];
     }
 
 
@@ -553,7 +807,6 @@ public abstract class AnalyticalAndGradientPlacer extends Placer {
     }
 
 
-
     public class NetBlock {
         final int blockIndex;
         final float offset;
@@ -600,6 +853,7 @@ public abstract class AnalyticalAndGradientPlacer extends Placer {
     class TimingNetBlock {
         final int blockIndex;
         final float offset;
+
         final TimingEdge timingEdge;
 
         final BlockType blockType;
@@ -671,5 +925,56 @@ public abstract class AnalyticalAndGradientPlacer extends Placer {
 
     		this.weight = weight;
     	}
+    }
+    
+    class ParallelOptiLeg implements Runnable{
+    	int iteration;
+    	boolean isLastIteration;
+    	double timerBegin;
+    	int dieCounter;
+    	StringBuilder output = new StringBuilder();
+    	public ParallelOptiLeg(int iteration, boolean isLastIteration, double timerBegin, int dieCounter) {
+    		this.iteration = iteration;
+    		this.isLastIteration = isLastIteration;
+    		this.timerBegin = timerBegin;
+    		this.dieCounter = dieCounter;
+    	}
+    	@Override
+    	public void run() {
+    		this.output = diePlacement(this.iteration, this.isLastIteration, this.timerBegin, this.dieCounter);
+    		System.out.println(this.output);
+    	}
+    	
+    	
+    }
+    
+    class nestedThreading implements Runnable{
+    	int startIteration;
+    	boolean isLastIteration;
+    	double timerBegin;
+    	int dieCounter;
+    	int nSync;
+
+    	public nestedThreading(int iteration, boolean isLastIteration, double timerBegin, int dieCounter, int nSync){// int syncStep) {
+    		this.startIteration = iteration;
+    		this.isLastIteration = isLastIteration;
+    		this.timerBegin = timerBegin;
+    		this.dieCounter = dieCounter;
+    		this.nSync = nSync;
+
+    	}
+    	@Override
+    	public void run() {
+    		int currentIteration = this.startIteration;
+    		
+    		for(int i = 1; i <= this.nSync; i++) {
+    			currentIteration =  this.startIteration + i;
+
+        		System.out.print("\nThe iteration counter is " + currentIteration + " for die " + this.dieCounter +"\n");
+
+    		}
+    	}
+    	
+    	
     }
 }

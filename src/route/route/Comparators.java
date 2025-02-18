@@ -17,25 +17,31 @@ public class Comparators {
     public static Comparator<Connection>  FanoutConnection = new Comparator<Connection>() {
     	@Override
     	public int compare(Connection a, Connection b) {
-    		if(a.net.fanout < b.net.fanout){
-    			return 1;
-    		}else if(a.net.fanout == b.net.fanout){
-    			if(a.boundingBox > b.boundingBox){
-    				return 1;
-    			}else if(a.boundingBox == b.boundingBox){
-    				if(a.hashCode() > b.hashCode()){
-    					return 1;
-    				}else if(a.hashCode() < b.hashCode()){
-    					return -1;
-    				}else{
-    					if(a != b) System.err.println("Failure: Error while comparing 2 connections. HashCode of Two Connections was identical");
-    					return 0;
-    				}
-    			}else{
-    				return -1;
-    			}
-    		}else{
+    		if(a.isCrossingSLL() && !b.isCrossingSLL()) {
     			return -1;
+    		}else if( !a.isCrossingSLL() && b.isCrossingSLL()){
+    			return 1;
+    		}else {
+        		if(a.net.fanout < b.net.fanout){
+        			return 1;
+        		}else if(a.net.fanout == b.net.fanout){
+        			if(a.boundingBox > b.boundingBox){
+        				return 1;
+        			}else if(a.boundingBox == b.boundingBox){
+        				if(a.hashCode() > b.hashCode()){
+        					return 1;
+        				}else if(a.hashCode() < b.hashCode()){
+        					return -1;
+        				}else{
+        					if(a != b) System.err.println("Failure: Error while comparing 2 connections. HashCode of Two Connections was identical");
+        					return 0;
+        				}
+        			}else{
+        				return -1;
+        			}
+        		}else{
+        			return -1;
+        		}
     		}
     	}
     };
@@ -43,27 +49,34 @@ public class Comparators {
 	public static Comparator<Net> FanoutNet = new Comparator<Net>() {
     	@Override
     	public int compare(Net n1, Net n2) {
-    		if(n1.fanout < n2.fanout){
-    			return 1;
-    		}else if(n1.fanout == n2.fanout){
-    			if(n1.hpwl > n2.hpwl){
-    				return 1;
-    			}else if(n1.hpwl == n2.hpwl){
-    				if(n1.hashCode() > n2.hashCode()){
-    					return 1;
-    				}else if(n1.hashCode() < n2.hashCode()){
-    					return -1;
-    				}else{
-    					if(n1 != n2) System.err.println("Failure: Error while comparing 2 nets. HashCode of Two Nets was identical");
-    					return 0;
-    				}
-    			}else{
-    				return -1;
-    			}
-    		}else{
+    		if(n1.sllFanout > n2.sllFanout) {
     			return -1;
-    		}
-    	}
+    		}else if(n1.sllFanout < n2.sllFanout) {
+    			return 1;
+    		}else {
+    			if(n1.fanout < n2.fanout){
+        			return 1;
+        		}else if(n1.fanout == n2.fanout){
+        			if(n1.hpwl > n2.hpwl){
+        				return 1;
+        			}else if(n1.hpwl == n2.hpwl){
+        				if(n1.hashCode() > n2.hashCode()){
+        					return 1;
+        				}else if(n1.hashCode() < n2.hashCode()){
+        					return -1;
+        				}else{
+        					if(n1 != n2) System.err.println("Failure: Error while comparing 2 nets. HashCode of Two Nets was identical");
+        					return 0;
+        				}
+        			}else{
+        				return -1;
+        			}
+        		}else{
+        			return -1;
+        		}
+        	}
+    	}	
+    		
     };
    
     public static Comparator<Connection> ConnectionCriticality = new Comparator<Connection>() {

@@ -7,6 +7,7 @@ public class TimingEdge {
 	private float fixedDelay, wireDelay;
 	private float slack, criticality;
 	
+	private boolean isSLL = false;
 	private final DelayTables delayTables;
 	private final TimingNode source, sink;
 
@@ -27,6 +28,14 @@ public class TimingEdge {
     	return this.sink;
     }
 
+    public void setSLLEdgeStatus() {
+    	this.isSLL = true;
+    }
+    
+    public boolean getSLLEdgeStatus() {
+    	return this.isSLL;
+    }
+    
     public void calculatePlacementEstimatedWireDelay(){
         int deltaX = Math.abs(this.source.getGlobalBlock().getColumn() - this.sink.getGlobalBlock().getColumn());
         int deltaY = Math.abs(this.source.getGlobalBlock().getRow() - this.sink.getGlobalBlock().getRow());

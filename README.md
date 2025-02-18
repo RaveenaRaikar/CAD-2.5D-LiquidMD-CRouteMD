@@ -1,8 +1,8 @@
-The FPGA CAD Framework
+The FPGA CAD Framework for 2.5 architectures
 ==============================
 
 An FPGA CAD framework focused on rapid prototyping of new CAD algorithms.
-The framework is implemented in Java. At this moment packing, placement and routing algorithms are implemented in the framework.
+The framework is implemented in Java. At this moment packing, placement and routing algorithms are implemented in the framework. This branch contains the adaptations for 2.5D PnR.
 
 
 What can I do with this tool flow?
@@ -11,25 +11,23 @@ What can I do with this tool flow?
 <ul>
 
 <li>
-Packing:
+Partitioning and Packing:
 <ul>
-  <li>Partitioning based packing: a multi-threaded implementation of a packer. Packing happens in two phases. Firstly the partitioningsbased packing and secondly the seed-based packing phase. A second phase is necessary to allow the packer to check architectural constraints. </li>
+  <li>Partitioning the circuit for 2.5D architecture followed by packing with AAPack (VTR8). </li>
 </ul>
 </li>
 
 <li>
 Placement:
 <ul>
-  <li>Simulated Annealing based Placement</li>
-  <li>Placement with an iterative analytical solver based placement</li>
-  <li>Placement with Liquid: A placer that uses steepest gradient descent moves to place a design</li>
+  <li> Modular Placement with LiquidMD: based on Liquid and optimized for 2.5D architectures</li>
 </ul>
 </li>
 
 <li>
 Routing:
 <ul>
-  <li>Connection-based routing: a fast timing-driven connection based router.</li>
+  <li>Connection-based routing with CRouteMD : based on CRoute and implemented for 2.5D architectures</li>
 </ul>
 </li>
 
@@ -56,35 +54,27 @@ Referencing the FPGA Placement Framework
 ---------------
 If you use the FPGA CAD Framework in your work, please reference the following papers in your publications: <br>
 
-Packing:
-<b>How preserving circuit design hierarchy during FPGA packing leads to better performance <br>
-Dries Vercruyce, Elias Vansteenkiste and Dirk Stroobandt</b> <br>
-<i> IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems}, 37(3), pp. 629-642.</i>
+Partitioning and Packing :
+<b>Multi-die heterogeneous FPGAs : how balanced should netlist partitioning be?<br>
+Raveena Raikar and Dirk Stroobandt</b> <br>
 
 Placement:
-<b>Liquid: High quality scalable placement for large heterogeneous FPGAs<br>
-Dries Vercruyce, Elias Vansteenkiste and Dirk Stroobandt</b> <br>
-<i> Field Programmable Technology (ICFPT), 2017 17th International Conference on. IEEE, 2017</i>
+<b>Modularity driven parallel placement algorithm for 2.5D FPGA architectures<br>
+Raveena Raikar and Dirk Stroobandt</b> <br>
+<b>LiquidMD: Optimizing Inter-die and Intra-die placement for 2.5D FPGA Architectures<br>
+Raveena Raikar and Dirk Stroobandt</b> <br>
 
 Routing:
-<b>CRoute: A fast high-quality timing-driven connection-based FPGA router<br>
-Dries Vercruyce, Elias Vansteenkiste and Dirk Stroobandt</b> <br>
-<i> accepted for publication</i>
+<b>Routing in 2.5D FPGAs: How long should interposer lines be?<br>
+Raveena Raikar and Dirk Stroobandt</b> <br>
 
 Contributors
 ---------------
 Active Contributors
 <ul>
-  <li>Yun Zhou - <a href="mailto:yun.zhou@ugent.be">yun.zhou@ugent.be</a></li>
+  <li>Raveena Raikar - <a href="mailto:raveenaramanand.raikar@ugent.be">raveenaramanand.raikar@ugent.be</a></li>
 </ul>
 
-Past Contributors
-<ul>
-  <li>Dries Vercruyce - <a href="mailto:dries.vercruyce@ugent.be">dries.vercruyce@ugent.be</a></li>
-  <li>Elias Vansteenkiste - <a href="mailto:Elias.Vansteenkiste@gmail.com">Elias.Vansteenkiste@gmail.com</a></li>
-  <li>Arno Messiaen - <a href="mailto:Arno.Messiaen@gmail.com">Arno.Messiaen@gmail.com</a></li>
-  <li>Seppe Lenders - <a href="mailto:Seppe.Lenders@gmail.com"> Seppe.Lenders@gmail.com</a></li>
-</ul>
 
 Development
 ---------------

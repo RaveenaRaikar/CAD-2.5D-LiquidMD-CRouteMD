@@ -48,7 +48,7 @@ Contact us
 ---------------
 The FPGA Placement Framework is released by Ghent University, ELIS department, Hardware and Embedded Systems (HES) group (http://hes.elis.ugent.be).
 
-If you encounter bugs, want to use the FPGA CAD Framework but need support or want to tell us about your results, please contact us. We can be reached at yun.zhou[at]ugent.be
+If you encounter bugs, want to use the FPGA CAD Framework but need support or want to tell us about your results, please contact us.
 
 Referencing the FPGA Placement Framework
 ---------------

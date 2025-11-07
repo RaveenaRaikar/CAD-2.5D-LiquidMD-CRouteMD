@@ -127,7 +127,8 @@ public class Circuit {
         this.globalBlockTypes = BlockType.getGlobalBlockTypes();
 
         for(BlockType blockType : this.globalBlockTypes) {
-            List<GlobalBlock> blocksOfType = (List<GlobalBlock>)(List<?>) this.blocks.get(blockType);
+            @SuppressWarnings("unchecked")
+			List<GlobalBlock> blocksOfType = (List<GlobalBlock>)(List<?>) this.blocks.get(blockType);
             this.globalBlockList.addAll(blocksOfType);
         }
 

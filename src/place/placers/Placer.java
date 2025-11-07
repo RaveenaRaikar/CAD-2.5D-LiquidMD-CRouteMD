@@ -29,7 +29,7 @@ public abstract class Placer {
     protected int TotalDies;
     protected int SLLrows;
     protected TimingGraphSLL timingGraphSLL;
-    //protected double maxSystemDelay;
+
     private Map<Integer,Map<String, Timer>> timers = new HashMap<>();
     private Map<String, Timer> timerSystem = new LinkedHashMap<>();
     //= new LinkedHashMap<>();

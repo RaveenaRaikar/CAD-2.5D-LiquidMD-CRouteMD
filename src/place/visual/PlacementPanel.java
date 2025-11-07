@@ -153,6 +153,7 @@ public class PlacementPanel extends JPanel {
     		g.fillOval((int)Math.round(left + i * scaleX) - d/2, (int)Math.round(bottom - this.bbCost[i] * scaleY) - d/2, d, d);
     		if(iteration == i)g.setColor(Color.BLUE);
     	}
+    	
     }
     private int getIteration(){
     	String name = this.placement.getName();

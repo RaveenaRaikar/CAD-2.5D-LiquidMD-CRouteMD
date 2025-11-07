@@ -86,7 +86,7 @@ class PlacerFactory {
         try {
             Class<? extends Placer> placerClass = this.getClass(placerName);
             Constructor<? extends Placer> placerConstructor = this.getConstructor(placerClass);
-            System.out.print("\nThe placer name is " + placerName + "\n" );
+//            System.out.print("\nThe placer name is " + placerName + "\n" );
             
             return placerConstructor.newInstance(circuit, options, random, this.logger, visualizer, totalDies, SLLrows);
 
@@ -100,7 +100,7 @@ class PlacerFactory {
         try {
             Class<? extends Placer> placerClass = this.getClass(placerName);
             Constructor<? extends Placer> placerConstructor = this.getNewConstructor(placerClass);
-            System.out.print("\nThe placer name is " + placerName + "\n" );
+//            System.out.print("\nThe placer name is " + placerName + "\n" );
             
             return placerConstructor.newInstance(circuit, options, random, this.logger, visualizer, totalDies, SLLrows, timingGraphSLL, netToBlockSLL);
 

@@ -7,6 +7,7 @@ import place.circuit.block.AbstractBlock;
 import place.circuit.block.AbstractSite;
 import place.circuit.block.GlobalBlock;
 import place.circuit.block.Macro;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.exceptions.FullSiteException;
 import place.circuit.exceptions.PlacedBlockException;
 import place.circuit.exceptions.PlacementException;
@@ -30,8 +31,8 @@ public class RandomPlacer extends Placer {
     }
 
     public RandomPlacer(Circuit[] circuitDie, Options options, Random random, Logger logger, 
-    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSLL) {
-        super(circuitDie, options, random ,logger, visualizer, TotalDies, SLLrows, timingGraphSLL);
+    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSLL,HashMap<String, SLLNetBlocks> netToBlockSLL) {
+        super(circuitDie, options, random ,logger, visualizer, TotalDies, SLLrows, timingGraphSLL, netToBlockSLL);
         
     }
 
@@ -85,8 +86,15 @@ public class RandomPlacer extends Placer {
             	if(macro.getBlock(0).getSite() == null){
                     BlockType blockType = macro.getBlock(0).getType();
                     List<AbstractSite> typeSites = sites.get(blockType);
-                    int nextSiteIndex = nextSiteIndexes.get(blockType);
-
+                    if (typeSites == null || typeSites.isEmpty()) {
+                        System.out.println("No sites found for blockType " + blockType + " on die " + dieCounter);
+                        continue; // Skip placing this macro
+                    }
+                    Integer nextSiteIndex = nextSiteIndexes.get(blockType);
+                    if (nextSiteIndex == null) {
+                        System.out.println("No site index found for blockType " + blockType + " on die " + dieCounter);
+                        continue;
+                    }
                     nextSiteIndex += this.placeMacro(macro, blockType, typeSites, nextSiteIndex,dieCounter);
                     nextSiteIndexes.put(blockType, nextSiteIndex);
             	}
@@ -96,6 +104,10 @@ public class RandomPlacer extends Placer {
             	if(blockType.equals(SllType)) {
             		List<AbstractBlock> typeDummyBlocks = this.circuitDie[dieCounter].getBlocks(blockType);
                     List<AbstractSite> typeVirtualSites = virtualSites.get(blockType);
+                    if (typeVirtualSites == null || typeVirtualSites.isEmpty()) {
+                        System.out.println("No sites found for blockType " + blockType + " on die " + dieCounter);
+                        continue; // Skip placing this macro
+                    }
                     int nextSiteIndex = nextVirtualSiteIndexes.get(blockType);
                     nextSiteIndex += this.placeBlocks(typeDummyBlocks, typeVirtualSites, nextSiteIndex);
                     nextVirtualSiteIndexes.put(blockType, nextSiteIndex);
@@ -136,7 +148,7 @@ public class RandomPlacer extends Placer {
                 firstSite = sites.get(siteIndex + 1);
                 column  = firstSite.getColumn();
                 firstRow = firstSite.getRow();
-                lastRow = firstRow + numBlocks * blockSpace;
+                lastRow = firstRow + (numBlocks) * blockSpace;
                 nextSiteIndex = nextSiteIndex + 1;
             }
 
@@ -167,10 +179,10 @@ public class RandomPlacer extends Placer {
     }
 
     private boolean illegalSite(BlockType blockType, int column, int row, int dieNumber) {
-        if(row >= this.circuitDie[dieNumber].getHeight() + 2) {
+        if(row >= this.circuitDie[dieNumber].getHeight() - 1) {
             return true;
         }
-        if(column >= this.circuitDie[dieNumber].getWidth() + 2) {
+        if(column >= this.circuitDie[dieNumber].getWidth() - 1) {
             return true;
         }
 

@@ -1,19 +1,22 @@
 package place.placers.analytical;
 
 import place.circuit.Circuit;
+import place.circuit.architecture.BlockType;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
 import place.interfaces.Options;
 import place.visual.PlacementVisualizer;
 
+import java.util.HashMap;
 import java.util.Random;
 
 public class GradientPlacerWLD extends GradientPlacer {
 
 
 	public GradientPlacerWLD(Circuit[] circuit, Options options, Random random, Logger logger, 
-			PlacementVisualizer[] visualizer, int Totaldies, int SLLrows,TimingGraphSLL timingGraphSys) {
-        super(circuit, options, random, logger, visualizer,Totaldies,SLLrows, timingGraphSys);
+			PlacementVisualizer[] visualizer, int Totaldies, int SLLrows,TimingGraphSLL timingGraphSys, HashMap<String, SLLNetBlocks> netToBlockSLL) {
+        super(circuit, options, random, logger, visualizer,Totaldies,SLLrows, timingGraphSys, netToBlockSLL);
     }
 
     @Override
@@ -21,6 +24,7 @@ public class GradientPlacerWLD extends GradientPlacer {
         return false;
     }
 
+    //Raveena : Start with a common setting for the parameters
     @Override
     protected void initializeIteration(int iteration, int dieCounter) {
         if(iteration > 0) {
@@ -39,6 +43,12 @@ public class GradientPlacerWLD extends GradientPlacer {
 	@Override
 	protected void calculateTimingCost(int dieCounter) {
 		this.timingCost[dieCounter] = 0;
+	}
+
+	@Override
+	protected void fixSLLblocks(BlockType category, int SLLrows) {
+		// TODO Auto-generated method stub
+		
 	}
 
 }

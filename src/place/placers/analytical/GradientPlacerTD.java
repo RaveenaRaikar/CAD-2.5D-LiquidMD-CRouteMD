@@ -1,6 +1,8 @@
 package place.placers.analytical;
 
 import place.circuit.Circuit;
+import place.circuit.architecture.BlockType;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.timing.TimingGraph;
 import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
@@ -9,6 +11,7 @@ import place.visual.PlacementVisualizer;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 
@@ -51,14 +54,13 @@ public class GradientPlacerTD extends GradientPlacer {
     private double[] criticalityExponent, criticalityThreshold, maxPerCritEdge;
     private TimingGraph[] timingGraph;
 
-    private double maxSystemDelay = 0;
-
     private CriticalityCalculator[] criticalityCalculator;
 
-    public GradientPlacerTD(Circuit[] circuitDie, Options options, Random random, Logger logger, PlacementVisualizer[] visualizer, 
-    		int TotalDies, int SLLrows, TimingGraphSLL timingGraphSys) {
-        super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSys);
+    public GradientPlacerTD(Circuit[] circuit, Options options, Random random, Logger logger, 
+			PlacementVisualizer[] visualizer, int Totaldies, int SLLrows,TimingGraphSLL timingGraphSys, HashMap<String, SLLNetBlocks> netToBlockSLL) {
+        super(circuit, options, random, logger, visualizer,Totaldies,SLLrows, timingGraphSys, netToBlockSLL);
 
+        //System.out.print("\nThe criticailutys is " + options.getDouble(O_CRITICALITY_EXPONENT));
         this.criticalityExponent = new double[this.TotalDies];
         		
         		
@@ -70,6 +72,7 @@ public class GradientPlacerTD extends GradientPlacer {
 
         this.tradeOff = options.getDouble(O_TRADE_OFF);
         int dieCount = 0;
+        //System.out.print("\nThis is executed+\n");
         while(dieCount < this.TotalDies) {
         	this.criticalityExponent[dieCount] = options.getDouble(O_CRITICALITY_EXPONENT);
         	this.criticalityThreshold[dieCount] = options.getDouble(O_CRITICALITY_THRESHOLD);
@@ -120,10 +123,12 @@ public class GradientPlacerTD extends GradientPlacer {
             this.learningRate[dieNumber] *= this.learningRateMultiplier[dieNumber];
             this.legalizer[dieNumber].multiplySettings();
             this.effortLevel[dieNumber] = Math.max(this.effortLevelStop, (int)Math.round(this.effortLevel[dieNumber]*0.5));
+            //System.out.print("\nFor die " + dieNumber + " the effort level is " + this.effortLevel[dieNumber] +"\n");
         }
     }
 
     private void updateCriticalConnections(int dieNumber) {
+    	//System.out.print("\nThe die Number is " + dieNumber);
     	for(TimingNet net : this.timingNets[dieNumber]) {
     		for(TimingNetBlock sink : net.sinks) {
     			sink.updateCriticality();
@@ -167,24 +172,30 @@ public class GradientPlacerTD extends GradientPlacer {
     @Override
     protected void processNets(boolean[] processNets, int dieNumber) {
         // Process all nets wirelength driven
-
+    	//System.out.print("\nIn TD placer");
         super.processNets(processNets, dieNumber);
 
         // Process the most critical source-sink connections
         for(CritConn critConn:this.criticalConnections.get(dieNumber)) {
-
+        	//System.out.print("\nThe die Number is " + dieNumber);
         	this.solver[dieNumber].processConnection(critConn.sourceIndex, critConn.sinkIndex, critConn.sinkOffset - critConn.sourceOffset, critConn.weight, true);
         }
     }
 
     @Override
     protected void calculateTimingCost(int dieNumber) {
-    	this.maxSystemDelay = this.timingGraphSLL.getTotalMaxDelay() / 1e9;
-        this.timingCost[dieNumber] = this.criticalityCalculator[dieNumber].calculate(this.legalX.get(dieNumber), this.legalY.get(dieNumber), this.maxSystemDelay);
+        this.timingCost[dieNumber] = this.criticalityCalculator[dieNumber].calculate(this.legalX.get(dieNumber), this.legalY.get(dieNumber));
     }
 
     @Override
     public String getName() {
         return "Timing driven gradient placer";
     }
+
+
+	@Override
+	protected void fixSLLblocks(BlockType category, int SLLrows) {
+		// TODO Auto-generated method stub
+		
+	}
 }

@@ -77,7 +77,7 @@ class DimensionSolverGradient {
     	if(critical){
             netSize = 2 * (5 * this.halfMaxConnectionLength) * coorDifference / ((5 * this.halfMaxConnectionLength) + coorDifference);
     	}else{
-
+    		//System.out.print("\nIs this true");
             netSize = 2 * this.halfMaxConnectionLength * coorDifference / (this.halfMaxConnectionLength + coorDifference);
     	}
 
@@ -113,7 +113,12 @@ class DimensionSolverGradient {
     	}
 
     	if(this.legalIsSet){
-    			gradient = (1 - this.pseudoWeight) * gradient + this.pseudoWeight * (this.legalCoordinates[i] - currentCoordinate);        	
+//    		if(i>111) {
+//    			gradient = (1 - 1) * gradient + 1 * (this.legalCoordinates[i] - currentCoordinate);
+//    		}else {
+    			gradient = (1 - this.pseudoWeight) * gradient + this.pseudoWeight * (this.legalCoordinates[i] - currentCoordinate);
+//    		}
+        	
         	
         }
 

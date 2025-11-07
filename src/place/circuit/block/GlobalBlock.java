@@ -30,6 +30,8 @@ public class GlobalBlock extends AbstractBlock {
     public boolean isSLLSource = false;
     public boolean isSLLSink = false;
     
+    public String wireType = "null";
+    
     public NetBlock netBlock;
     //Source -- source --SLL -- sink --Sink
 

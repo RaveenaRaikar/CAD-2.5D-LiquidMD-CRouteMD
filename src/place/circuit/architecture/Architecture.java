@@ -37,7 +37,7 @@ public class Architecture implements Serializable {
 
 
     private boolean autoSize;
-    private int width, height, totDie;
+    public int width, height, totDie, archRows, archCols;
     private double autoRatio;
 
     private int sllRows;
@@ -65,7 +65,9 @@ public class Architecture implements Serializable {
             File netFile,
             int totDie,
             int sllRows,
-            float sllDelay) {
+            float sllDelay,
+            int archRows,
+            int archCols) {
 
         this.architectureFile = architectureFile;
 
@@ -75,6 +77,8 @@ public class Architecture implements Serializable {
         this.circuitName = circuitName;
         this.sllRows = sllRows;
         this.sllDelay = sllDelay;
+        this.archCols = archCols;
+        this.archRows = archRows;
     }
 
     public void parse() throws ParseException, IOException, InvalidFileFormatException, InterruptedException, ParserConfigurationException, SAXException {
@@ -118,7 +122,14 @@ public class Architecture implements Serializable {
         	this.width = Integer.parseInt(fixedSizeLayout.getAttribute("width"));
             this.height = Integer.parseInt(fixedSizeLayout.getAttribute("height"));
             System.out.print("\nDimensions of chip: " + this.width +" x " + this.height);
-            this.height = this.height/this.totDie;
+            if(this.archCols == 2) {
+            	this.height = this.height/this.archRows;
+            	this.width = this.width/this.archCols;
+            }else {
+            	this.height = this.height/this.totDie;	
+            }
+            
+            System.out.print("\nArchitecture Configuration: " + this.archRows +" x " + this.archCols);
             System.out.print("\nDimensions of die: " + this.width +" x " + this.height);
 
         } else {

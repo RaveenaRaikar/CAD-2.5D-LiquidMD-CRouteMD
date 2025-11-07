@@ -48,6 +48,7 @@ class HeapLegalizer extends Legalizer {
 
 
         // Initialize the matrix to contain a linked list at each coordinate
+        //this.currentDie = CurrentDie;
         this.blockMatrix = new ArrayList<List<List<LegalizerBlock>>>(this.width);
         for(int column = 0; column < this.width; column++) {
             List<List<LegalizerBlock>> blockColumn = new ArrayList<>(this.height);
@@ -56,12 +57,14 @@ class HeapLegalizer extends Legalizer {
             }
             this.blockMatrix.add(blockColumn);
         }
-        this.currentDie = this.circuit.getCurrentDie();
+//        this.currentDie = circuit.getCurrentDie();
     }
 
 
     @Override
-    protected void legalizeBlockType(int blocksStart, int blocksEnd) {
+    protected void legalizeBlockType(int blocksStart, int blocksEnd, int dieNumber) {
+//    	System.out.print("\nThis is activated " + this.currentDie);
+    	this.currentDie = dieNumber;
         initializeBlockMatrix(blocksStart, blocksEnd);
 
         // Build a set of disjunct areas that are not over-utilized
@@ -110,7 +113,7 @@ class HeapLegalizer extends Legalizer {
         
 
         if(this.blockCategory == BlockCategory.CLB) {
-            column = (int) Math.round(x);
+            column = (int) Math.round(Math.max(Math.min(x, this.width - 3), 2)); //Math.round(x);
             row = (int) Math.round(Math.max(Math.min(y, this.height - 3), 2));
 
         } else {

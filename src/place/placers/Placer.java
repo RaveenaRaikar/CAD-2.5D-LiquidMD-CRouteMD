@@ -1,6 +1,7 @@
 package place.placers;
 
 import place.circuit.Circuit;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.exceptions.PlacementException;
 import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
@@ -56,7 +57,7 @@ public abstract class Placer {
 
     }
     protected Placer(Circuit[] circuitDie, Options options, Random random, Logger logger, 
-    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSLL) {
+    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSLL, HashMap<String, SLLNetBlocks> netToBlock) {
         this.circuitDie = circuitDie;
         this.options = options;
         this.random = random;
@@ -224,12 +225,17 @@ public abstract class Placer {
 
     protected StringBuilder printStats(String... stats) {
         StringBuilder line = new StringBuilder();
-        for(int i = 0; i < this.numStats; i++) {
-            int length = this.statLengths.get(i);
-            String format = "%-" + (length + Placer.statSpaces) + "s";
-            String stat = String.format(format, stats[i]);
-            
-            line.append(String.format("%-"+length+"s", stat));
+        for (int i = 0; i < this.numStats; i++) {
+            if (i < stats.length) {  // Check if the index is within bounds
+                int length = this.statLengths.get(i);
+                String format = "%-" + (length + Placer.statSpaces) + "s";
+                String stat = String.format(format, stats[i]);
+
+                line.append(String.format("%-" + length + "s", stat));
+            } else {
+                line.append(" ".repeat(this.statLengths.get(i)));  // Append empty space if no stat
+            }
+//            System.out.print("\nThe line is" + line);
         }
         return line;
     }

@@ -5,20 +5,28 @@ import place.circuit.architecture.BlockCategory;
 import place.circuit.architecture.BlockType;
 import place.circuit.block.AbstractBlock;
 import place.circuit.block.GlobalBlock;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.exceptions.BlockTypeException;
 import place.circuit.pin.AbstractPin;
 import place.circuit.timing.TimingGraphSLL;
 import place.circuit.timing.TimingNode;
 import place.interfaces.Logger;
 import place.interfaces.Options;
+import place.placers.analytical.AnalyticalAndGradientPlacer.BlockInfo;
 import place.visual.PlacementVisualizer;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 
 public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
@@ -144,15 +152,17 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
     private double[] maxConnectionLength;
     protected double[] learningRate, learningRateMultiplier;
     private final double beta1, beta2, eps;
-
+    private HashMap<String, SLLNetBlocks> netToBlockSLL = new HashMap<>();
     protected int numIterations;
     protected int[] effortLevel;
     protected final int effortLevelStart, effortLevelStop;
+    private HashMap<Integer, List<Position>> freeSites = new HashMap<>();
 
     // Only used by GradientPlacerTD
     protected double tradeOff; 
     protected List<List<CritConn>> criticalConnections;
 
+//    private int archCols, archRows;
     private CostCalculator[] costCalculator;
     private SllLegalizer sllLegalizer;
 
@@ -167,6 +177,7 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
     private List<float[]> netBlockOffsets;
     private int[] netBlockSize;
 
+    private int archCols, archRows;
     protected List<boolean[]> fixed;
    // protected List<boolean[]> sllFixed;
     private List<double[]> coordinatesX;
@@ -180,9 +191,10 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
             PlacementVisualizer[] visualizer,
             int TotalDies,
             int SLLrows,
-            TimingGraphSLL timingGraphSLL){
+            TimingGraphSLL timingGraphSLL,
+            HashMap<String, SLLNetBlocks> netToBlockSLL){
 
-		super(circuitDie, options, random, logger, visualizer, TotalDies,SLLrows, timingGraphSLL);
+		super(circuitDie, options, random, logger, visualizer, TotalDies,SLLrows, timingGraphSLL, netToBlockSLL);
         this.anchorWeight = new double[this.TotalDies];
         this.criticalConnections = new ArrayList<>();
         this.anchorWeightExponent = this.options.getDouble(O_ANCHOR_WEIGHT_EXPONENT);
@@ -194,6 +206,10 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
     	this.maxConnectionLength = new double[this.TotalDies];
     	this.learningRate = new double[this.TotalDies];
     	this.learningRateMultiplier = new double[this.TotalDies];
+    	this.netToBlockSLL = netToBlockSLL;
+    	this.localOutput = new StringBuilder();
+    	this.archCols = this.circuitDie[0].getArchitecture().archCols;
+    	this.archRows = this.circuitDie[0].getArchitecture().archRows;
     	int dieCount = 0;
 
 
@@ -408,7 +424,11 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
         		this.sLLNodeList,
         		this.circuitDie[0].getWidth(),
         		this.circuitDie[0].getHeight(),
-        		this.SLLrows);
+        		this.SLLrows,
+        		this.netToBlockSLL);
+        
+
+
     }
     
     int isValidXlocation(int Xloc, int direction) {
@@ -434,71 +454,430 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
     	return FinalXloc;
     }
 
-    @Override
-    protected void fixSLLblocks(BlockType solveType, int SLLrowsCount) {
-    	//Check if the solvetype is dummy SLL block
-    	//Get the list of SLL blocks/nets
-    	// Compare the names and get the blocks on both the dies.
-    	//Set the legal and linear arrays for the block counter to the specific(but Random)
-    	//locations.
+    
+    private void addPosition(int die, int startRow, int endRow, int startCol, int endCol) {
 
-    	int XCounter = 0, YCounter = 0; 
-    	int SLLRows = SLLrowsCount-1;
+    	for(int row = startRow; row < endRow; row++) {
+    		for(int col = startCol; col < endCol; col++) {
+    			Position newPosition = new Position(col, row, die);
+        		if(!this.freeSites.get(die).contains(newPosition)) {
+        			this.freeSites.get(die).add(newPosition);
+        		}
+        	}
+    	}
+    	
+    }
+    
+    
+    
+    
+ // put this once (field) or create once per call:
+    private final Random RNG = new Random();
 
+    // Helper to hold a rectangle band (inclusive)
+    static final class Band {
+        final int xL, xH, yL, yH;
+        Band(int xL, int xH, int yL, int yH){ this.xL=xL; this.xH=xH; this.yL=yL; this.yH=yH; }
+        boolean accepts(Position p){
+            return p.isFree() && p.x >= xL && p.x <= xH && p.y >= yL && p.y <= yH;
+        }
+    }
+
+
+
+
+
+
+
+ // ---------- Small helpers ----------
+
+    private static Band band(int xL, int xH, int yL, int yH) {
+        return (xL <= xH && yL <= yH) ? new Band(xL,xH,yL,yH) : null;
+    }
+
+    private BlockInfo pickAdjacentOrFallback(List<BlockInfo> blocks, int archRows) {
+        BlockInfo src = blocks.get(0);
+        int sDie = src.getDieID();
+        BlockInfo fallback = null;
+        for (int i = 1; i < blocks.size(); i++) {
+            BlockInfo sink = blocks.get(i);
+            if (areAdjacent(sDie, sink.getDieID(), archRows)) return sink;
+            if (fallback == null) fallback = sink;
+        }
+        return (fallback != null) ? fallback : blocks.get(1);
+    }
+
+    private Position findExactFree(List<Position> pool, Position wanted) {
+        if (pool == null) return null;
+        for (Position p : pool) {
+            if (p.isFree() && p.x == wanted.x && p.y == wanted.y && p.die == wanted.die ) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    // ---------- 1×4 (archCols == 1) helpers ----------
+    private Band computeSourceBand1x4(int sDie, int tDie, int W, int H, int sllrows, boolean adjacent) {
+        int xL = 2, xH = W - 3;
+        boolean targetBelow = sDie < tDie;
+        int yL = targetBelow ? (H + 1 - sllrows) : 1;
+        int yH = targetBelow ? (H - 1)           : (sllrows - 2);
+        return band(xL, xH, yL, yH);
+    }
+    private Position mirrorSink1x4(Position src, int sDie, int tDie, int W, int H, int sllrows, boolean adjacent) {
+        int tx = src.x, ty;
+        boolean targetBelow = sDie < tDie;
+        if (targetBelow) { int off = H - src.y;     ty = sllrows - off; }
+        else             { int off = sllrows - src.y; ty = H - off;     }
+        return new Position(tx, ty, tDie);
+    }
+    private Position[] placePrimaryPair1x4(int sDie, int tDie, int W, int H, int sllrows, Random rng) {
+        List<Position> srcPool = this.freeSites.get(sDie);
+        List<Position> tgtPool = this.freeSites.get(tDie);
+        if (srcPool == null || srcPool.isEmpty() || tgtPool == null || tgtPool.isEmpty()) return null;
+
+        Band srcBand = computeSourceBand1x4(sDie, tDie, W, H, sllrows, true);
+        List<Position> shuffled = new ArrayList<>(srcPool);
+        Collections.shuffle(shuffled, rng);
+        for (Position sPos : shuffled) {
+            if (!srcBand.accepts(sPos)) continue;
+            Position wanted = mirrorSink1x4(sPos, sDie, tDie, W, H, sllrows, true);
+            Position match  = findExactFree(tgtPool, wanted);
+            if (match != null) {
+                sPos.occupyPosition();
+                match.occupyPosition();
+                return new Position[]{ sPos, match };
+            }
+        }
+        return null;
+    }
+    private Position pickBestSecondarySink1x4(int sDie, int oDie, Position src, int W, int H, int sllrows) {
+        List<Position> pool = this.freeSites.get(oDie);
+        if (pool == null || pool.isEmpty()) return null;
+        // band toward the inter-die boundary
+        boolean sourceAbove = sDie < oDie;
+        Band band = band(2, W-3, sourceAbove ? 1 : (H+1 - sllrows), sourceAbove ? (sllrows-2) : (H-1));
+
+        Position best = null; int bestScore = Integer.MAX_VALUE;
+        int preferredRow = sourceAbove ? 1 : (H - 1);
+        for (Position p : pool) {
+            if (!band.accepts(p)) continue;
+            int dist = Math.abs(p.x - src.x) + Math.abs(p.y - src.y);
+            int bias = Math.abs(p.y - preferredRow);
+            int score = dist + 2*bias;
+            if (score < bestScore) { best = p; bestScore = score; if (score == 0) break; }
+        }
+        return best;
+    }
+
+    // ---------- 2×2 (archCols == 2) helpers ----------
+    private boolean isVerticalAdj2x2(int a, int b)   { return Math.abs(a - b) == 2; }
+    private boolean isHorizontalAdj2x2(int a, int b) { return Math.abs(a - b) == 1; }
+    private boolean isDiagonal2x2(int a, int b)      { return Math.abs(a - b) == 3; }
+
+    // Source band: thin strip(s) near the boundary/corner toward target
+    private Band computeSourceBand2x2(int sDie, int tDie, int W, int H, int sllrows) {
+        final int coreYMin = 2, coreYMax = H - 3;
+        final int coreXMin = 2, coreXMax = W - 3;
+
+        if (isVerticalAdj2x2(sDie, tDie)) {
+            // x full core, y thin at top/bottom
+            if (sDie < tDie) return band(coreXMin, coreXMax, H + 1 - sllrows, H - 1); // target below
+            else             return band(coreXMin, coreXMax, 1,               sllrows - 2);
+        }
+        if (isHorizontalAdj2x2(sDie, tDie)) {
+            // x thin left/right, y full core
+            if (sDie < tDie) return band(W + 1 - sllrows, W - 1,       coreYMin, coreYMax) ; // right
+            else            return band(1,               sllrows - 2, coreYMin, coreYMax) ; // left
+        }
+        // Diagonal → corner strip (thin in both x and y)
+        boolean right  = (tDie % 2) > (sDie % 2);
+        boolean bottom = (tDie / 2) > (sDie / 2);
+        int xL = right ? (W + 1 - sllrows) : 1;
+        int xH = right ? (W - 1)           : (sllrows - 2);
+        int yL = bottom ? (H + 1 - sllrows) : 1;
+        int yH = bottom ? (H - 1)           : (sllrows - 2);
+        // If you must avoid IO-edge cells, clamp to core: xL=Math.max(xL,2) ...
+        return band(xL, xH, yL, yH);
+    }
+
+    // Primary sink mirror (includes diagonal double reflection)
+    private Position mirrorSink2x2(Position src, int sDie, int tDie, int W, int H, int sllrows) {
+        int tx = src.x, ty = src.y;
+        
+        
+        if (isVerticalAdj2x2(sDie, tDie)) {
+            if (sDie < tDie) { int off = H - src.y;   ty = sllrows - off; }
+            else             { int off = sllrows - src.y; ty = H - off;   }
+        } else if (isHorizontalAdj2x2(sDie, tDie)) {
+        	
+        	if((sDie == 1 && tDie == 2) || (sDie == 2 && tDie == 1)) {
+//        		System.out.print("\nIs this true");
+                boolean right  = (tDie % 2) > (sDie % 2);
+                boolean bottom = (tDie / 2) > (sDie / 2);
+                if (bottom)    { int off = H - src.y;     ty = sllrows - off; } else { int off = sllrows - src.y; ty = H - off; }
+                if (right)     { int off = W - src.x;     tx = sllrows - off; } else { int off = sllrows - src.x; tx = W - off; }
+        	}
+//        	System.out.print("\nThis is true");
+            if (sDie < tDie) { int off = W - src.x;   tx = sllrows - off; }
+            else             { int off = sllrows - src.x; tx = W - off;   }
+        } else { // diagonal → reflect on both axes toward target quadrant
+//        	System.out.print("\nIs this true");
+            boolean right  = (tDie % 2) > (sDie % 2);
+            boolean bottom = (tDie / 2) > (sDie / 2);
+            if (bottom)    { int off = H - src.y;     ty = sllrows - off; } else { int off = sllrows - src.y; ty = H - off; }
+            if (right)     { int off = W - src.x;     tx = sllrows - off; } else { int off = sllrows - src.x; tx = W - off; }
+        }
+        return new Position(tx, ty, tDie);
+    }
+
+    private Position[] placePrimaryPair2x2(int sDie, int tDie, int W, int H, int sllrows, Random rng) {
+        List<Position> srcPool = this.freeSites.get(sDie);
+        List<Position> tgtPool = this.freeSites.get(tDie);
+        if (srcPool == null || srcPool.isEmpty() || tgtPool == null || tgtPool.isEmpty()) return null;
+
+        Band srcBand = computeSourceBand2x2(sDie, tDie, W, H, sllrows);
+        if (srcBand == null) return null;
+
+        List<Position> shuffled = new ArrayList<>(srcPool);
+        Collections.shuffle(shuffled, rng);
+        for (Position sPos : shuffled) {
+            if (!srcBand.accepts(sPos)) continue;
+//            System.out.print("\nThe sourcePos is " + sPos);
+            Position wanted = mirrorSink2x2(sPos, sDie, tDie, W, H, sllrows);
+//            System.out.print("\nwanted is " + wanted);
+            Position match  = findExactFree(tgtPool, wanted);
+            if (match != null) {
+//            	System.out.print("\nThe sourcePos is " + sPos);
+//            	System.out.print("\nThe match is " + match);
+                sPos.occupyPosition();
+                match.occupyPosition();
+                return new Position[]{ sPos, match };
+            }
+        }
+        return null;
+    }
+
+    // Secondary sinks scoring (distance + boundary/corner bias)
+    private Position pickBestSecondarySink2x2(int sDie, int oDie, Position src, int W, int H, int sllrows) {
+        List<Position> pool = this.freeSites.get(oDie);
+        if (pool == null || pool.isEmpty()) return null;
+
+        int dieCols = 2; // 2×2 grid
+        int sx = sDie % dieCols, sy = sDie / dieCols;
+        int ox = oDie % dieCols, oy = oDie / dieCols;
+
+        Integer prefX = (sx == ox) ? null : (sx < ox ? W - 1 : 0);
+        Integer prefY = (sy == oy) ? null : (sy < oy ? H - 1 : 0);
+
+        Position best = null; int bestScore = Integer.MAX_VALUE;
+        for (Position p : pool) {
+            if (!p.isFree()) continue;
+            int dist  = Math.abs(p.x - src.x) + Math.abs(p.y - src.y);
+            int biasX = (prefX == null) ? 0 : Math.abs(p.x - prefX);
+            int biasY = (prefY == null) ? 0 : Math.abs(p.y - prefY);
+            int score = dist + 2 * (biasX + biasY);
+            if (score < bestScore) { best = p; bestScore = score; if (score == 0) break; }
+        }
+        return best;
+    }
+
+    // ---------- Main (handles archCols 1 and 2) ----------
+    protected void fixSLLblocksLiquidMD(BlockType solveType, int sllrows) {
+        final int archRows = this.circuitDie[0].getArchitecture().archRows;
+        final int width    = this.circuitDie[0].getWidth();
+        final int height   = this.circuitDie[0].getHeight();
+
+        this.initialisePositions(sllrows);
+
+        // Copy keys to avoid surprises if SLLcounter is modified inside the loop
+        List<String> sllKeys = new ArrayList<>(this.SLLcounter.keySet());
+        final Random rng = new Random();
+
+        for (String sllName : sllKeys) {
+        	
+            List<BlockInfo> all = this.SLLcounter.get(sllName);
+
+//            
+            if (all == null || all.size() < 2) continue;
+
+            BlockInfo source = all.get(0);
+            int sourceDie    = source.getDieID();
+            if(source.getDieID() == 3) {
+            	System.out.print("\nthe sll is " + sllName + " with size " + all.size());
+            }
+
+            // choose primary sink (adjacent preferred)
+            BlockInfo primary = pickAdjacentOrFallback(all, archRows);
+            int targetDie     = primary.getDieID();
+//            System.out.print("\nThe sourceDie is " + sourceDie + " and target is " + targetDie);
+            Position[] pair;
+            if (this.archCols == 1) {
+                pair = placePrimaryPair1x4(sourceDie, targetDie, width, height, sllrows, rng);
+            } else if (this.archCols == 2) {
+                pair = placePrimaryPair2x2(sourceDie, targetDie, width, height, sllrows, rng);
+            } else {
+                System.err.println("Unsupported archCols = " + this.archCols);
+                continue;
+            }
+
+            if (pair == null) {
+                System.err.println("Failed to place primary pair for " + sllName);
+                continue; // go to next SLL
+            }
+
+            Position srcPos = pair[0], tgtPos = pair[1];
+            source.setXY(srcPos.x, srcPos.y);
+            primary.setXY(tgtPos.x, tgtPos.y);
+	    	if(source.getDieID() == 3) {
+	    		System.out.print("\nSink on die " + source.getDieID() + " is at " + source.getX()+ " " + source.getY());
+	    		System.out.print("\nSink on die " + primary.getDieID() + " is at " + primary.getX()+ " " + primary.getY());
+	    	}
+            // Place remaining sinks
+            for (int i = 1; i < all.size(); i++) {
+                BlockInfo sink = all.get(i);
+                if (sink == primary) continue;
+
+                Position best;
+                if (this.archCols == 1) {
+                    best = pickBestSecondarySink1x4(sourceDie, sink.getDieID(), srcPos, width, height, sllrows);
+                } else {
+                    best = pickBestSecondarySink2x2(sourceDie, sink.getDieID(), srcPos, width, height, sllrows);
+                }
+
+                if (best != null) {
+                    best.occupyPosition();
+                    sink.setXY(best.x, best.y);
+	    	    	if(source.getDieID() == 3) {
+	    	    		System.out.print("\nSink on die " + sink.getDieID() + " is at " + sink.getX()+ " " + sink.getY());
+	    	    	}
+                } else {
+                    System.err.println("No free site for sink " + sink.getBlockCounter() +
+                                       " die " + sink.getDieID() + " net " + sllName);
+                }
+            }
+
+            // Single write-back for this net
+            for (BlockInfo b : all) {
+                int d = b.getDieID(), id = b.getBlockCounter();
+                int x = b.getX(), y = b.getY();
+                this.legalX.get(d)[id]  = x;
+                this.linearX.get(d)[id] = x;
+                this.linearY.get(d)[id] = y;
+                this.legalY.get(d)[id]  = y;
+            }
+        }
+    }
+
+    
+
+    
+    private void initialisePositions(int sllrows) {
     	int width = this.circuitDie[0].getWidth();
-    	int height = this.circuitDie[0].getHeight();
-    	
-
-    	
-    	int Xloc = 0,Yloc = 0;
-    	int XlastLeft = width, XlastRight = width;
-    	int direction = 0;
-    	boolean isRight = false;
-    	boolean isXdirection = true;
-		
-		for(String block: this.SLLcounter.keySet())
-    	{		
-			if(isXdirection) {
-				if(isRight) {
-					direction = 1;				
-					Xloc = XlastRight + 1; 
-					Xloc = isValidXlocation(Xloc,direction);
-					XlastRight = Xloc;
-					isRight = false;
+        int height = this.circuitDie[0].getHeight();
+    	if(this.circuitDie[0].getArchitecture().archCols == 1) {
+    		if(this.circuitDie[0].getArchitecture().archRows == 2) {
+    			for(int die = 0; die < this.TotalDies; die++) {
+    				this.freeSites.put(die, new ArrayList<>());
+    				if(die == 0) {
+    					this.addPosition(die, height - sllrows + 1, height - 1, 2 , width - 2);
+    				}
+    				else if(die == 1) {
+    					this.addPosition(die, 1, sllrows - 1, 2 , width - 2);
+    				}
+    			}
+    		}
+    		else if(this.circuitDie[0].getArchitecture().archRows == 4) {
+    			for(int die = 0; die < this.TotalDies; die++) {
+    				this.freeSites.put(die, new ArrayList<>());
+    				if(die == 0) {
+    					this.addPosition(die, height - sllrows + 1, height, 2 , width - 2);
+    				}
+    				else if(die == 3) {
+    					this.addPosition(die, 1, sllrows - 1, 2 , width - 2);
+    				}else {
+    					this.addPosition(die, height - sllrows + 1, height, 2 , width - 2);
+    					this.addPosition(die, 1, sllrows - 1, 2 , width - 2);
+    				}
+    			}
+    			
+    		}else {
+    			System.err.print("\nThis Configuration is not supported");
+    		}
+    	}else if(this.circuitDie[0].getArchitecture().archCols == 2) {
+//    		System.out.print("\nThe height is starting at " + (height - sllrows));
+    		for(int die = 0; die < this.TotalDies; die++) {
+    			this.freeSites.put(die, new ArrayList<>());
+				if(die == 0 || die == 2) {
+					if(die == 0) {
+						this.addPosition(die, height - sllrows + 1, height - 1, 2, width);
+						this.addPosition(die, 2, height, width - sllrows + 1, width - 1);
+					}else {
+						this.addPosition(die, 1, sllrows - 1, 2, width);
+						this.addPosition(die, 1, height - 2, width - sllrows + 1, width - 1);
+					}
+					
 				}else {
-					direction = - 1;
-					Xloc = XlastLeft - 1;
-					Xloc = isValidXlocation(Xloc,direction);
-					XlastLeft = Xloc;
-					isRight = true;
+					
+					if(die == 1) {
+						this.addPosition(die, height - sllrows + 1, height - 1, 1, width - 2);
+						this.addPosition(die, 2, height, 1, sllrows - 1);
+					}else {
+						this.addPosition(die, 1, sllrows - 1, 1, width - 2);
+						this.addPosition(die, 1, height - 2, 1, sllrows - 1);
+					}
+					
 				}
-				isXdirection = false;
 			}
-			
-			Yloc = height - YCounter - 1;
-    		List<Integer> blockcounter = this.SLLcounter.get(block);
-
-    		for(int dieCounter = 0; dieCounter < this.TotalDies ; dieCounter++) {
-    			this.legalX.get(dieCounter)[blockcounter.get(dieCounter)] = Xloc;
-    			this.linearX.get(dieCounter)[blockcounter.get(dieCounter)] = Xloc;
-    			if (dieCounter == 0) {
-    				this.legalY.get(dieCounter)[blockcounter.get(dieCounter)] = Yloc;
-    				this.linearY.get(dieCounter)[blockcounter.get(dieCounter)] = Yloc;
-    			}else {
-    				this.legalY.get(dieCounter)[blockcounter.get(dieCounter)] = SLLRows - YCounter;
-    				this.linearY.get(dieCounter)[blockcounter.get(dieCounter)] = SLLRows - YCounter;
-    			}
-    		}
-    		YCounter++;
-    		if(YCounter==SLLRows) {
-    			YCounter = 0;
-    			isXdirection = true;
-    			if(!isRight) {
-    				XCounter++;
-    			}
-    		}
+    	}else {
+    		System.err.print("\nThis Configuration is not supported");
     	}
     }
+    
+    private boolean areAdjacent(int source, int sink, int archRows) {
+    	if(this.circuitDie[0].getArchitecture().archCols == 1) {
+    		int rowA = source % archRows;
+            int colA = source / archRows;
+            int rowB = sink % archRows;
+            int colB = sink / archRows;
+
+            // Manhattan distance of 1 means adjacent in grid
+            return (Math.abs(rowA - rowB) + Math.abs(colA - colB)) == 1;
+    	}else if(this.circuitDie[0].getArchitecture().archCols == 2){
+    	    int gridRows = 2; // Number of rows in die layout
+    	    int gridCols = 2; // Number of columns in die layout
+
+    	    // Map die index to 2D grid coordinates
+    	    int rowA = source / gridCols;
+    	    int colA = source % gridCols;
+    	    int rowB = sink / gridCols;
+    	    int colB = sink % gridCols;
+    	    
+    	    return (Math.abs(rowA - rowB) + Math.abs(colA - colB)) == 1;
+
+    	}else {
+    		System.out.print("\nThis configuration is not supported");
+    		return false;
+    	}
+    	
+    	
+        
+    }
+
+
+    
+
+    enum AdjacencyDirection {
+        NONE, VERTICAL, HORIZONTAL
+    }
+    
+
+    
+
+    
+
+
 
     @Override
     protected void synchroniseSLLblocks(StringBuilder localOutput) {
@@ -524,12 +903,13 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
 		for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.IO)){
 			this.fixBlockType(blockType, dieNum);
 		}
-		if(this.Global_fix) {
-
-			for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
-				this.fixBlockType(blockType, dieNum);
-			}	
+		//Fix the position of SLL Dummy blocks in the array
+		for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
+			this.fixBlockType(blockType, dieNum);
 		}
+
+
+
 		this.doSolveLinear(this.allTrue.get(dieNum),dieNum);
     }
 
@@ -550,11 +930,11 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
 			}
 		}
 		
-		for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
-			if(!blockType.equals(solveType)){
-				this.fixBlockType(blockType, dieNum);
-			}
-		}
+//		for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
+//			if(!blockType.equals(solveType)){
+//				this.fixBlockType(blockType, dieNum);
+//			}
+//		}
 
     	for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.CLB)){
     		if(!blockType.equals(solveType)){
@@ -686,11 +1066,6 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
         for(BlockType legalizeType:BlockType.getBlockTypes(BlockCategory.IO)){
         	this.legalizer[dieNum].legalize(legalizeType, isLastIteration);
         }
-
-            for(BlockType legalizeType:BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
-
-           	  this.legalizer[dieNum].legalize(legalizeType, isLastIteration);
-            }
         
 
         this.stopTimer(T_LEGALIZE, dieNum);
@@ -817,7 +1192,7 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
     protected StringBuilder printStatistics(int iteration, double time , int dieCounter) {
     	StringBuilder localOutput = new StringBuilder();
         List<String> stats = new ArrayList<>();
-
+        stats.add(Integer.toString(dieCounter));
         stats.add(Integer.toString(iteration));
         stats.add(Integer.toString(this.effortLevel[dieCounter]));
         stats.add(String.format("%.3f", this.learningRate[dieCounter]));
@@ -864,4 +1239,42 @@ public abstract class GradientPlacer extends AnalyticalAndGradientPlacer {
     public void printLegalizationRuntime(int dieNum){
     	this.legalizer[dieNum].printLegalizationRuntime();
     }
+    
+    //define all the virtual positions of the system.
+    class Position {
+        public int x, y;
+        public int die;
+        private boolean isFree = true;
+        Position(int x, int y, int die) {
+        	this.x = x; 
+        	this.y = y; 
+        	this.die = die;
+        	}
+        public void occupyPosition() {
+        	this.isFree = false;
+        }
+        
+        public boolean isFree() {
+        	return this.isFree;
+        }
+        // Override equals and hashCode for correct behavior in collections
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof Position)) return false;
+            Position other = (Position) obj;
+            return this.x == other.x && this.y == other.y && this.die == other.die;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(x, y, die);
+        }
+
+        @Override
+        public String toString() {
+            return "Die: " + die + ", x: " + x + ", y: " + y;
+        }
+    }
+    
 }

@@ -13,11 +13,14 @@ import java.util.Set;
 import java.util.Stack;
 
 import place.circuit.Circuit;
+import place.circuit.architecture.Architecture;
 import place.circuit.architecture.BlockCategory;
 import place.circuit.architecture.DelayTables;
 
 public class TimingGraphSLL {
 	private Circuit[] circuitdie;
+	
+	private Architecture arch;
 	private TimingGraph[] timingGraphdie;
 	private List<TimingNode> allTimingNodes = new ArrayList<>();
 	private List<TimingEdge> allTimingEdges = new ArrayList<>();
@@ -32,9 +35,10 @@ public class TimingGraphSLL {
     
     private double sllDelay;
     
-	public TimingGraphSLL(Circuit[] circuitdie, int totDie) {
+	public TimingGraphSLL(Circuit[] circuitdie, Architecture arch, int totDie) {
 		this.circuitdie = circuitdie;
 		this.totaldie = totDie;
+		this.arch = arch;
 		
 		this.setCriticalityExponent(1);
 		
@@ -51,8 +55,6 @@ public class TimingGraphSLL {
         
         this.setGlobalTimingEdges();
         
-        this.calculateArrivalTimesAndCriticalities(false);
-
         
         
     }
@@ -68,7 +70,7 @@ public class TimingGraphSLL {
     	List<TimingNode> sllSourceNodes = new ArrayList<>(); 
     	List<TimingNode> sllSinkNodes = new ArrayList<>(); 
     	
-    	
+    	this.sllDelay = this.circuitdie[0].getArchitecture().sllDelay;
     	for(int i = 0; i < this.totaldie; i ++) {
     		this.timingGraphdie[i] = this.circuitdie[i].getTimingGraph();
     		this.allTimingNodes.addAll(this.timingGraphdie[i].getTimingNodes());
@@ -195,26 +197,85 @@ public class TimingGraphSLL {
         this.calculateArrivalTimesAndCriticalities(false);
     }
     
-    public void recalculateSystemTimingGraph() {
+   
+    private boolean areAdjacent(int source, int sink, int archRows, int archCols) {
+    	if(archCols == 1) {
+    		int rowA = source % archRows;
+            int colA = source / archRows;
+            int rowB = sink % archRows;
+            int colB = sink / archRows;
 
-        this.setSLLdelay();
-        this.calculateArrivalTimesAndCriticalities(true);
-    }
-    
-    
-    public void setSLLdelay() {
-    	for(TimingEdge edge:this.allTimingEdges){
-    		if(edge.isSLLedge()) {
-    			edge.setFixedDelay(this.sllDelay);
+            // Manhattan distance of 1 means adjacent in grid
+            return (Math.abs(rowA - rowB) + Math.abs(colA - colB)) == 1;
+    	}else if(archCols == 2){
+    	    int gridRows = 2; // Number of rows in die layout
+    	    int gridCols = 2; // Number of columns in die layout
 
-    		}
+    	    // Map die index to 2D grid coordinates
+    	    int rowA = source / gridCols;
+    	    int colA = source % gridCols;
+    	    int rowB = sink / gridCols;
+    	    int colB = sink % gridCols;
+    	    
+    	    return (Math.abs(rowA - rowB) + Math.abs(colA - colB)) == 1;
+
+    	}else {
+    		System.out.print("\nThis configuration is not supported");
+    		return false;
     	}
     }
+    
+    
     public void calculateAllWireDelays() {
+    	
+    	//Recalculate the wire delay for SLLs only?
+    	
+    	//Get delay to go from 0 to height of a die.
+    	double spanDelay;
+    	double totalDelay;
+    	
+    	int deltaY = this.arch.height;
+    	BlockCategory fromCategory = BlockCategory.CLB,toCategory = BlockCategory.CLB;
+        
+    	spanDelay =  this.delayTables.getDelay(fromCategory, toCategory, 0, deltaY);
+    	if(this.arch.archCols == 2) {
+    		int deltaX = this.arch.width;
+    		spanDelay = this.delayTables.getDelay(fromCategory, toCategory, deltaX, deltaY);
+    		spanDelay = spanDelay/2;
+    	}
 
     	
     	for(TimingEdge edge:this.allTimingEdges){
     		if(edge.isSLLedge()) {
+    			int sourceDie = edge.getSource().getDieID();
+    			int sinkDie = edge.getSink().getDieID();
+    			int hopDie; // = Math.abs(sourceDie - sinkDie);
+    			if(areAdjacent(sourceDie, sinkDie, this.arch.archRows, this.arch.archCols)) { //Dies are adjacent, can use only one SLL
+    				edge.setFixedDelay(this.sllDelay);
+    			}else {
+    				
+    				
+    				//add sll delay + spanning delay.
+//    				totalDelay = (hopDie * (this.sllDelay + spanDelay)) - spanDelay;
+//    				edge.setFixedDelay(totalDelay);
+    				
+    				if(this.arch.archCols == 2) {
+    					hopDie = 2;
+    					totalDelay = (hopDie * this.sllDelay) + spanDelay;
+//        				totalDelay = (hopDie * (this.sllDelay + spanDelay)) - spanDelay;
+        				edge.setFixedDelay(totalDelay);
+    				}else {
+    					hopDie = Math.abs(sourceDie - sinkDie);
+        				totalDelay = (hopDie * (this.sllDelay + spanDelay)) - spanDelay;
+        				edge.setFixedDelay(totalDelay);
+    				}
+//    				System.out.print("\nThe source node is on die " + edge.getSource().getDieID() + " and sink is on " + edge.getSink().getDieID()+ " with delay "+ totalDelay);
+    				
+    			}
+    			
+    			
+    			
+//    			System.out.print("\nThe source node is on die " + edge.getSource().getgPin() + " and sink is on " + edge.getSink().getgPin());
 
     			edge.setFixedDelay(this.sllDelay);
     		}

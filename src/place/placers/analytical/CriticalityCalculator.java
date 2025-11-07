@@ -19,7 +19,7 @@ class CriticalityCalculator{
     private TimingGraph timingGraph;
     private DelayTables delayTables;
     private BlockCategory[] blockCategories;
-    private double MaxSysDelay = 0;
+  //  private TimingGraphSLL timingGraphSystem;
 
     private List<TimingNet> nets;
 
@@ -42,19 +42,13 @@ class CriticalityCalculator{
         this.nets = nets;
     }
 
-    public double calculate(double[] x, double[] y, double MaxSysDelay) {
-        this.updateDelays(x, y);
-        this.timingGraph.calculateCriticalities(false, MaxSysDelay);
-        
-        return this.timingGraph.getMaxDelay();
-    }
     public double calculate(double[] x, double[] y) {
         this.updateDelays(x, y);
-
         this.timingGraph.calculateCriticalities(false);
         
         return this.timingGraph.getMaxDelay();
     }
+    
 
     private void updateDelays(double[] x, double[] y) {
         for(TimingNet net : this.nets) {

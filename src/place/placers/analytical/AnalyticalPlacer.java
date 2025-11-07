@@ -4,6 +4,7 @@ import place.circuit.Circuit;
 import place.circuit.architecture.BlockCategory;
 import place.circuit.architecture.BlockType;
 import place.circuit.block.GlobalBlock;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
 import place.interfaces.Options;
@@ -77,9 +78,10 @@ public abstract class AnalyticalPlacer extends AnalyticalAndGradientPlacer {
     		PlacementVisualizer[] visualizer,
     		int TotalDies,
     		int SLLrows,
-    		TimingGraphSLL timingGraphSys){
+    		TimingGraphSLL timingGraphSys,
+    		HashMap<String, SLLNetBlocks> netToBlockSLL){
 
-        super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSys);
+        super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSys, netToBlockSLL);
 
         this.anchorWeight[TotalDies] = this.options.getDouble(O_ANCHOR_WEIGHT);
         this.anchorWeightMultiplier = this.options.getDouble(O_ANCHOR_WEIGHT_MULTIPLIER);
@@ -289,6 +291,7 @@ public abstract class AnalyticalPlacer extends AnalyticalAndGradientPlacer {
     @Override
     protected void solveLegal(BlockType legalizeType, boolean isLastIteration, int dieNumber) {
         this.startTimer(T_LEGALIZE, dieNumber);
+        
         this.legalizer[dieNumber].legalize(legalizeType, isLastIteration);
         this.stopTimer(T_LEGALIZE, dieNumber);
     }

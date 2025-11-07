@@ -4,7 +4,7 @@ import place.main.Main;
 
 public class CLI {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
 
         Logger logger = new Logger();
         CLIOptions options = new CLIOptions(logger);

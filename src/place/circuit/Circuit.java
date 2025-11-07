@@ -39,6 +39,7 @@ public class Circuit {
 
 
     private Map<BlockType, List<AbstractBlock>> blocks;
+    private Map<BlockType, List<AbstractBlock>> sllblocks;
 
     private List<BlockType> globalBlockTypes;
     private List<GlobalBlock> globalBlockList = new ArrayList<GlobalBlock>();
@@ -61,12 +62,12 @@ public class Circuit {
         this.timingGraph = new TimingGraph(this);
     }
 
-    public Circuit(String name, Architecture architecture, Map<BlockType, List<AbstractBlock>> blocks, int totdie, int dieNum, int SLLrows) {
+    public Circuit(String name, Architecture architecture, Map<BlockType, List<AbstractBlock>> blocks, int totdie, int dienum, int SLLrows) {
         this.name = name;
         this.architecture = architecture;
         this.totaldie = totdie;
         this.blocks = blocks;
-        this.dienum = dieNum;
+        this.dienum = dienum;
         this.sllRows = SLLrows;
         this.timingGraph = new TimingGraph(this);
         
@@ -78,8 +79,8 @@ public class Circuit {
         
     }
 
-    public void initializeData(int dieNumber) {
-        this.loadBlocks(dieNumber);
+    public void initializeData() {
+        this.loadBlocks();
 
         this.timingGraph.build();
 
@@ -113,7 +114,7 @@ public class Circuit {
     }
 
 
-    private void loadBlocks(int dieNumber) {
+    private void loadBlocks() {
     	//Adding the blocks from the architecture
         for(BlockType blockType : BlockType.getBlockTypes()) {
             if(!this.blocks.containsKey(blockType)) {
@@ -133,7 +134,7 @@ public class Circuit {
         this.loadMacros();
 
         this.createColumns();
-        this.createSites(dieNumber);
+        this.createSites(this.dienum);
     }
 
     private void loadMacros() {
@@ -268,26 +269,58 @@ public class Circuit {
     }
     
     private void cacheColumns(BlockType ioType, BlockType emptyType, List<BlockType> blockTypes) {
-        /**
-         * Make a list that contains the block type of each column
-         */
-    	
-        this.columns = new ArrayList<BlockType>(this.width);
-        this.columns.add(emptyType);
-        this.columns.add(ioType);
-        for(int column = 2; column < this.width - 2; column++) {
-            for(BlockType blockType : blockTypes) {
-                int repeat = blockType.getRepeat();
-                int start = blockType.getStart();
-                if(column % repeat == start || repeat == -1 && column == start) {
-                    this.columns.add(blockType);
+        final int W = this.width; // note: this is width/2 in 2x2
+        final boolean twoByTwo  = (this.architecture.archCols == 2);
+        final int dieId = this.dienum;
+        final boolean rightHalf = twoByTwo && (dieId == 1 || dieId == 3);
+
+        // Indices
+        final int L_SENT = 0, L_IO = 1, R_IO = W - 2, R_SENT = W - 1;
+
+        // Pre-size and fill with empty
+        this.columns = new ArrayList<>(java.util.Collections.nCopies(W + 2, emptyType));
+
+        // Place IOs/sentinels
+        if (twoByTwo) {
+            if (rightHalf) {
+                this.columns.set(R_IO, ioType);
+                this.columns.set(R_SENT, emptyType);
+            } else {
+                this.columns.set(L_SENT, emptyType);
+                this.columns.set(L_IO, ioType);
+            }
+        } else {
+            this.columns.set(L_SENT, emptyType);
+            this.columns.set(L_IO, ioType);
+            this.columns.set(R_IO, ioType);
+            this.columns.set(R_SENT, emptyType);
+        }
+
+        // Interior range and base shift for pattern math
+        final int start = twoByTwo ? (rightHalf ? 0 : 2) : 2;
+        final int end   = twoByTwo ? (rightHalf ? R_IO : W) : R_IO; // exclusive
+        final int base  = rightHalf ? W : 0;
+
+        // Fill interior columns
+        for (int c = start; c < end; c++) {
+            final int n = base + c; // virtual/global column index
+            BlockType chosen = null;
+
+            for (BlockType bt : blockTypes) {
+                int repeat = bt.getRepeat();
+                int startAt = bt.getStart();
+
+                if ((repeat == -1 && n == startAt) ||
+                    (repeat > 0 && n >= startAt && (n - startAt) % repeat == 0)) {
+                    chosen = bt;
                     break;
                 }
             }
+
+            if (chosen != null) this.columns.set(c, chosen);
         }
-        this.columns.add(ioType);
-        this.columns.add(emptyType);
     }
+
 
     private void cacheColumnsPerBlockType(List<BlockType> blockTypes) {
         /**
@@ -356,68 +389,422 @@ public class Circuit {
         }
     }
 
-    private void createSites(int dieNumber) {
-
-
-        BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
-        BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
-        BlockType SllType = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
-        int ioCapacity = this.architecture.getIoCapacity();
-	     for (int i = 0; i < this.height ; i++) {
-	         this.sites[this.dienum][0][i] = new Site(this.dienum, 0, i, emptyType);
-	         this.sites[this.dienum][this.width - 1][i] = new Site(this.dienum, this.width - 1, i, emptyType);
-	     }
-	     // Rows for EMPTY
-	     if (dieNumber == 0) {
-	         for (int i = 0; i < this.width; i++) {
-	             this.sites[this.dienum][i][0] = new Site(this.dienum, i, 0, emptyType);
-	         }
-	     } else if (dieNumber == 1) {
-	         for (int i = 0; i < this.width; i++) {
-	             this.sites[this.dienum][i][this.height - 1] = new Site(this.dienum, i, this.height - 1, emptyType);
-	         }
-	     }
-	     
-        
-	     // Columns for IOs
-	     for (int i = 1; i < this.height - 1; i++) {
-	         this.sites[this.dienum][1][i] = new IOSite(this.dienum, 1, i, ioType, ioCapacity);
-	         this.sites[this.dienum][this.width - 2][i] = new IOSite(this.dienum, this.width - 2, i, ioType, ioCapacity);
-	     }
-	
-	     // Rows for IOs
-	     if (dieNumber == 0) {
-	         for (int i = 1; i < this.width - 1; i++) {
-	             this.sites[this.dienum][i][1] = new IOSite(this.dienum, i, 1, ioType, ioCapacity);
-	         }
-	     } else if (dieNumber == 1) {
-	         for (int i = 1; i < this.width - 1; i++) {
-	             this.sites[this.dienum][i][this.height - 2] = new IOSite(this.dienum, i, this.height - 2, ioType, ioCapacity);
-	         }
-	     }
-	
-	     for (int column = 2; column < this.width - 2; column++) {
-	         BlockType blockType = this.columns.get(column);
-	         int blockHeight = blockType.getHeight();
-	         for (int row = 2; row < this.height - 1 - blockHeight; row += blockHeight) {
-	             this.sites[this.dienum][column][row] = new Site(this.dienum, column, row, blockType);
-	         }
-	     }
-	
-	     // For a SLL region
-	     for (int column = 1; column < this.width - 1; column++) {
-	         int startRow = (dieNumber == 0) ? this.height + 1 - this.sllRows : 0;
-	         int endRow = (dieNumber == 0) ? this.height : this.sllRows;
-	
-	         for (int row = startRow; row < endRow; row++) {
-	             this.virtualSites[this.dienum][column][row] = new VirtualSite(this.dienum, column, row, SllType);
-	         }
-	     }
-
+    //Configurations and the numbering
+//    ----------            -------------------
+//    |        |            |        |        |
+//    |  die 0 |            |  die 0 |  die 1 |
+//    |        |            |        |        |
+//    ----------            -------------------
+//    |        |            |        |        |
+//    |  die 1 |            |  die 2 |  die 3 |
+//    |        |            |        |        |
+//    ----------            -------------------
+//    |        |
+//    |  die 2 |
+//    |        |
+//    ----------
+//    |        |
+//    |  die 3 |
+//    |        |
+//    ----------
+//    
+    
+    public void createSites(int dieIndex) {
+    	
+    	if(this.architecture.archCols == 1) {
+    		this.createSitesSingleCol(dieIndex);
+    		
+    	}else if(this.architecture.archCols == 2) {
+    		this.createSitesMultCol(dieIndex);
+    	}else {
+    		System.err.print("\nThis configuration is not supported");
+    	}
     }
 
 
 
+    public void createSitesSingleCol(int dieIndex) {
+    	BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
+        BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
+        BlockType sllType = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
+        int ioCapacity = this.architecture.getIoCapacity();
+//        System.out.print("\nThe dieNumber is " + dieIndex);
+        // Add EMPTY to left and right edges
+        for (int row = 0; row < this.height; row++) {
+            this.sites[dieIndex][0][row] = new Site(dieIndex, 0, row, emptyType);
+            this.sites[dieIndex][this.width - 1][row] = new Site(dieIndex, this.width - 1, row, emptyType);
+        }
+
+        // Add IO to left and right (inside the EMPTY)
+        for (int row = 1; row < this.height - 1; row++) {
+            this.sites[dieIndex][1][row] = new IOSite(dieIndex, 1, row, ioType, ioCapacity);
+            this.sites[dieIndex][this.width - 2][row] = new IOSite(dieIndex, this.width - 2, row, ioType, ioCapacity);
+        }
+
+        // Bottom die: add EMPTY + IO on bottom row
+        if (dieIndex == 0) {
+            for (int col = 0; col < this.width; col++) {
+                this.sites[dieIndex][col][0] = new Site(dieIndex, col, 0, emptyType);
+            }
+            for (int col = 1; col < this.width - 1; col++) {
+                this.sites[dieIndex][col][1] = new IOSite(dieIndex, col, 1, ioType, ioCapacity);
+            }
+        }
+
+        // Top die: add EMPTY + IO on top row
+        if (dieIndex == this.totaldie - 1) {
+            for (int col = 0; col < this.width; col++) {
+                this.sites[dieIndex][col][this.height - 1] = new Site(dieIndex, col, this.height - 1, emptyType);
+            }
+            for (int col = 1; col < this.width - 1; col++) {
+                this.sites[dieIndex][col][this.height - 2] = new IOSite(dieIndex, col, this.height - 2, ioType, ioCapacity);
+            }
+        }
+
+        // Add functional block sites (core region)
+        for (int column = 2; column < this.width - 2; column++) {
+            BlockType blockType = this.columns.get(column);
+            int blockHeight = blockType.getHeight();
+            for (int row = 2; row <= this.height - 2 - blockHeight; row += blockHeight) {
+//            	if(dieIndex == 3) {
+//            		System.out.print("\nSite added at " + row + " column: " + column);
+//            	}
+                this.sites[dieIndex][column][row] = new Site(dieIndex, column, row, blockType);
+            }
+        }
+        
+        if(dieIndex == 0 || dieIndex == (this.totaldie -1)) {
+        	if(dieIndex == 0) {
+                for (int col = 1; col < this.width - 2; col++) {
+                    for (int row = this.height - this.sllRows - 1; row < this.height; row++) {
+                        this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                    }
+                }
+        	}else {
+                for (int col = 1; col < this.width - 2; col++) {
+                    for (int row = 0; row < this.sllRows; row++) {
+                        this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                    }
+                }
+        	}
+        }else {
+        	//middle region, add at both.
+        	if(height > (2*this.sllRows)) {
+        		for (int col = 1; col < this.width - 2; col++) {
+                    for (int row = this.height - this.sllRows - 1; row < this.height; row++) {
+                        this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                    }
+                }
+        		
+        		for (int col = 1; col < this.width - 2; col++) {
+                    for (int row = 0; row < this.sllRows; row++) {
+                        this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                    }
+                }
+        		
+        	}else {
+        		for (int col = 1; col < this.width - 2; col++) {
+                    for (int row = 0; row < this.height; row++) {
+                        this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                    }
+                }
+        	}
+        	
+        }
+    }
+    
+//  ----------            -------------------
+//  |        |            |        |        |
+//  |  die 0 |            |  die 0 |  die 1 |
+//  |        |            |        |        |
+//  ----------            -------------------
+//  |        |            |        |        |
+//  |  die 1 |            |  die 2 |  die 3 |
+//  |        |            |        |        |
+//  ----------            -------------------
+//  |        |
+//  |  die 2 |
+//  |        |
+//  ----------
+//  |        |
+//  |  die 3 |
+//  |        |
+//  ----------
+    
+    public void createSitesMultCol(int dieIndex) {
+        BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
+        BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
+        BlockType sllType = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
+        int ioCapacity = this.architecture.getIoCapacity();
+
+        //Add IO and empty at left and right edges
+        if(dieIndex == 0 || dieIndex == 2) {
+            for (int row = 0; row < this.height; row++) {
+                this.sites[dieIndex][0][row] = new Site(dieIndex, 0, row, emptyType);
+            }
+            for (int row = 1; row < this.height - 1; row++) {
+                this.sites[dieIndex][1][row] = new IOSite(dieIndex, 1, row, ioType, ioCapacity);
+            }
+        }else if(dieIndex == 1 || dieIndex == 3) {
+            for (int row = 0; row < this.height; row++) {
+                this.sites[dieIndex][this.width - 1][row] = new Site(dieIndex, this.width - 1, row, emptyType);
+            }
+            for (int row = 1; row < this.height - 1; row++) {
+                this.sites[dieIndex][this.width - 2][row] = new IOSite(dieIndex, this.width - 2, row, ioType, ioCapacity);
+            }
+        }
+        
+        // Bottom/Top rows for dies
+        if(dieIndex == 0 || dieIndex == 1) {
+            for (int col = 0; col < this.width; col++) {
+                this.sites[dieIndex][col][0] = new Site(dieIndex, col, 0, emptyType);
+            }
+            for (int col = 1; col < this.width - 1; col++) {
+                this.sites[dieIndex][col][1] = new IOSite(dieIndex, col, 1, ioType, ioCapacity);
+            }
+        }else if(dieIndex == 2 || dieIndex == 3) {
+            for (int col = 0; col < this.width; col++) {
+                this.sites[dieIndex][col][this.height - 1] = new Site(dieIndex, col, this.height - 1, emptyType);
+            }
+            for (int col = 1; col < this.width - 1; col++) {
+                this.sites[dieIndex][col][this.height - 2] = new IOSite(dieIndex, col, this.height - 2, ioType, ioCapacity);
+            }
+        }
+
+
+        // Core block site placement
+        for (int col = 2; col < this.width - 2; col++) {
+            BlockType blockType = this.columns.get(col);
+            int blockHeight = blockType.getHeight();
+            for (int row = 2; row <= this.height - 2 - blockHeight; row += blockHeight) {
+//            	System.out.print("\nThe block added at column " + col + " and row " + row + " is " + blockType);
+                this.sites[dieIndex][col][row] = new Site(dieIndex, col, row, blockType);
+            }
+        }
+
+        System.out.print("\nThe height is " + (this.height - this.sllRows));
+        //Bottom and top rows
+        if(dieIndex == 0 || dieIndex == 1) {
+        	for (int col = 1; col < this.width - 1; col++) {
+                for (int row = this.height - this.sllRows - 1; row < this.height; row++) {
+                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                }
+            }
+        }
+        if(dieIndex == 2 || dieIndex == 3) {
+            for (int col = 1; col < this.width - 1; col++) {
+                for (int row = 0; row < this.sllRows; row++) {
+                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                }
+            }
+        }
+        
+        //side rows
+        if (dieIndex == 0 || dieIndex == 2) {
+            for (int col = this.width - this.sllRows - 1; col < this.width; col++) {
+                for (int row = 1; row < this.height - 1; row++) {
+                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                }
+            }
+        }
+
+        if (dieIndex == 1 || dieIndex == 3) {
+            for (int col = 1; col < this.sllRows; col++) {
+                for (int row = 1; row < this.height; row++) {
+                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+                }
+            }
+        }
+
+    }
+
+    
+//    public void createSitesMultCol(int dieIndex) {
+//    	BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
+//        BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
+//        BlockType sllType = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
+//        int ioCapacity = this.architecture.getIoCapacity();
+////        System.out.print("\nThe dieNumber is " + dieIndex);
+//        // Add EMPTY to left and right edges
+//        for (int row = 0; row < this.height; row++) {
+//            this.sites[dieIndex][0][row] = new Site(dieIndex, 0, row, emptyType);
+//            this.sites[dieIndex][this.width - 1][row] = new Site(dieIndex, this.width - 1, row, emptyType);
+//        }
+//
+//        // Add IO to left and right (inside the EMPTY)
+//        for (int row = 1; row < this.height - 1; row++) {
+//            this.sites[dieIndex][1][row] = new IOSite(dieIndex, 1, row, ioType, ioCapacity);
+//            this.sites[dieIndex][this.width - 2][row] = new IOSite(dieIndex, this.width - 2, row, ioType, ioCapacity);
+//        }
+//
+//        // Bottom die: add EMPTY + IO on bottom row
+//        if (dieIndex == 0) {
+//        	for (int row = 0; row < this.height; row++) {
+//                this.sites[dieIndex][0][row] = new Site(dieIndex, 0, row, emptyType);
+////                this.sites[dieIndex][this.width - 1][row] = new Site(dieIndex, this.width - 1, row, emptyType);
+//            }
+//
+//            // Add IO to left and right (inside the EMPTY)
+//            for (int row = 1; row < this.height - 1; row++) {
+//                this.sites[dieIndex][1][row] = new IOSite(dieIndex, 1, row, ioType, ioCapacity);
+////                this.sites[dieIndex][this.width - 2][row] = new IOSite(dieIndex, this.width - 2, row, ioType, ioCapacity);
+//            }
+//        	
+//            for (int col = 0; col < this.width; col++) {
+//                this.sites[dieIndex][col][0] = new Site(dieIndex, col, 0, emptyType);
+//            }
+//            for (int col = 1; col < this.width - 1; col++) {
+//                this.sites[dieIndex][col][1] = new IOSite(dieIndex, col, 1, ioType, ioCapacity);
+//            }
+//            
+//            for (int column = 2; column < this.width - 2; column++) {
+//                BlockType blockType = this.columns.get(column);
+//                int blockHeight = blockType.getHeight();
+//                for (int row = 2; row < this.height - 1 - blockHeight; row += blockHeight) {
+////                	if(dieIndex == 3) {
+////                		System.out.print("\nSite added at " + row + " column: " + column);
+////                	}
+//                    this.sites[dieIndex][column][row] = new Site(dieIndex, column, row, blockType);
+//                }
+//            }
+//            
+//    		for (int col = 1; col < this.width - 1; col++) {
+//    			for (int row = this.height - this.sllRows; row < this.height; row++) {
+//                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+//                }
+//            }
+//    		
+//    		for (int col = this.width - this.sllRows; col < this.width; col++) {
+//    			for (int row = 1; row < this.height - 1; row++) {
+//                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+//                }
+//            }
+//    		           
+//        }else if (dieIndex == 1) {
+//        	for (int row = 0; row < this.height; row++) {
+//                this.sites[dieIndex][this.width - 1][row] = new Site(dieIndex, 0, row, emptyType);
+////                this.sites[dieIndex][this.width - 1][row] = new Site(dieIndex, this.width - 1, row, emptyType);
+//            }
+//
+//            // Add IO to left and right (inside the EMPTY)
+//            for (int row = 1; row < this.height - 1; row++) {
+//                this.sites[dieIndex][this.width - 2][row] = new IOSite(dieIndex, 1, row, ioType, ioCapacity);
+////                this.sites[dieIndex][this.width - 2][row] = new IOSite(dieIndex, this.width - 2, row, ioType, ioCapacity);
+//            }
+//        	
+//            for (int col = 0; col < this.width; col++) {
+//                this.sites[dieIndex][col][0] = new Site(dieIndex, col, 0, emptyType);
+//            }
+//            for (int col = 1; col < this.width - 1; col++) {
+//                this.sites[dieIndex][col][1] = new IOSite(dieIndex, col, 1, ioType, ioCapacity);
+//            }
+//            
+//            for (int column = 2; column < this.width - 2; column++) {
+//                BlockType blockType = this.columns.get(column);
+//                int blockHeight = blockType.getHeight();
+//                for (int row = 2; row < this.height - 1 - blockHeight; row += blockHeight) {
+////                	if(dieIndex == 3) {
+////                		System.out.print("\nSite added at " + row + " column: " + column);
+////                	}
+//                    this.sites[dieIndex][column][row] = new Site(dieIndex, column, row, blockType);
+//                }
+//            }
+//            
+//    		for (int col = 1; col < this.width - 1; col++) {
+//    			for (int row = this.height - this.sllRows; row < this.height; row++) {
+//                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+//                }
+//            }
+//    		
+//   		
+//    		for (int col = 1; col < this.sllRows; col++) {
+//                for (int row = 1; row < this.height; row++) {
+//                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+//                }
+//            }
+//        }else if (dieIndex == 2) {
+//        	for (int row = 0; row < this.height; row++) {
+//                this.sites[dieIndex][0][row] = new Site(dieIndex, 0, row, emptyType);
+////                this.sites[dieIndex][this.width - 1][row] = new Site(dieIndex, this.width - 1, row, emptyType);
+//            }
+//
+//            // Add IO to left and right (inside the EMPTY)
+//            for (int row = 1; row < this.height - 1; row++) {
+//                this.sites[dieIndex][1][row] = new IOSite(dieIndex, 1, row, ioType, ioCapacity);
+////                this.sites[dieIndex][this.width - 2][row] = new IOSite(dieIndex, this.width - 2, row, ioType, ioCapacity);
+//            }
+//        	
+//            for (int col = 0; col < this.width; col++) {
+//                this.sites[dieIndex][col][this.height - 1] = new Site(dieIndex, col, 0, emptyType);
+//            }
+//            for (int col = 1; col < this.width - 1; col++) {
+//                this.sites[dieIndex][col][this.height - 2] = new IOSite(dieIndex, col, 1, ioType, ioCapacity);
+//            }
+//            
+//             
+//            
+//            for (int column = 2; column < this.width - 2; column++) {
+//                BlockType blockType = this.columns.get(column);
+//                int blockHeight = blockType.getHeight();
+//                for (int row = 2; row < this.height - 1 - blockHeight; row += blockHeight) {
+//
+//                    this.sites[dieIndex][column][row] = new Site(dieIndex, column, row, blockType);
+//                }
+//            }
+//            
+//    		for (int col = 1; col < this.width - 1; col++) {
+//    			for (int row = 1; row < this.sllRows; row++) {
+//                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+//                }
+//            }
+//    		
+//    		for (int col = this.width - this.sllRows; col < this.width; col++) {
+//    			for (int row = 1; row < this.height - 1; row++) {
+//                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+//                }
+//            }
+//    		
+//        }else if (dieIndex == 3) {
+//        	for (int row = 0; row < this.height; row++) {
+//                this.sites[dieIndex][0][row] = new Site(dieIndex, 0, row, emptyType);
+//
+//            }
+//
+//            // Add IO to left and right (inside the EMPTY)
+//            for (int row = 1; row < this.height - 1; row++) {
+//                this.sites[dieIndex][1][row] = new IOSite(dieIndex, 1, row, ioType, ioCapacity);
+//
+//            }
+//        	
+//            for (int col = 0; col < this.width; col++) {
+//                this.sites[dieIndex][col][this.height - 1] = new Site(dieIndex, col, 0, emptyType);
+//            }
+//            for (int col = 1; col < this.width - 1; col++) {
+//                this.sites[dieIndex][col][this.height - 2] = new IOSite(dieIndex, col, 1, ioType, ioCapacity);
+//            }
+//            
+//            for (int column = 2; column < this.width - 2; column++) {
+//                BlockType blockType = this.columns.get(column);
+//                int blockHeight = blockType.getHeight();
+//                for (int row = 2; row < this.height - 1 - blockHeight; row += blockHeight) {
+//                    this.sites[dieIndex][column][row] = new Site(dieIndex, column, row, blockType);
+//                }
+//            }
+//            
+//    		for (int col = 1; col < this.sllRows; col++) {
+//                for (int row = 1; row < this.height; row++) {
+//                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+//                }
+//            }
+//    		for (int col = 1; col < this.width - 1; col++) {
+//    			for (int row = 1; row < this.sllRows; row++) {
+//                    this.virtualSites[dieIndex][col][row] = new VirtualSite(dieIndex, col, row, sllType);
+//                }
+//            }
+//    		
+//
+//        }
+//    }
 
     /*************************
      * Timing graph wrapping *
@@ -463,6 +850,13 @@ public class Circuit {
     public int getHeight() {
         return this.height;
     }
+    
+    public void setDieNum(int newDieNum) {
+        this.dienum = newDieNum;
+        // Recalculate or adjust properties dependent on dieNum
+//        updateCircuitForDieNumber(newDieNum);
+    }
+    
     public int getCurrentDie() {
         return this.dienum;
     }
@@ -570,61 +964,170 @@ public class Circuit {
     public List<AbstractSite> getSites(BlockType blockType, int dieNumber) {
         BlockType ioType = BlockType.getBlockTypes(BlockCategory.IO).get(0);
         BlockType emptyType = BlockType.getBlockTypes(BlockCategory.EMPTY).get(0);
-        List<AbstractSite> sites = null;
+        List<AbstractSite> sites = new ArrayList<>();
+
         int ioCapacity = this.architecture.getIoCapacity();
+
         if (blockType.equals(ioType)) {
-            int totalSites = (this.width - 1 * (this.height - 1)) * ioCapacity;
-            sites = new ArrayList<>(totalSites);
+            // IO block: Handle across multiple dies dynamically
+            int totalSites = (this.width - 1) * (this.height - 1) * ioCapacity;
             for (int n = 0; n < ioCapacity; n++) {
+                // Handle IO sites for each die number
                 for (int i = 1; i < this.height - 1; i++) {
-                    sites.add(this.sites[dieNumber][1][i]);
-                    sites.add(this.sites[dieNumber][this.width - 2][i]);
+                    // Add left and right edge IO sites for each die
+                    sites.add(this.sites[dieNumber][1][i]); // Left side
+                    sites.add(this.sites[dieNumber][this.width - 2][i]); // Right side
                 }
                 for (int i = 1; i < this.width - 1; i++) {
+                    // Handle top and bottom edge IO sites for the first and last dies
                     if (dieNumber == 0) {
-                        sites.add(this.sites[dieNumber][i][1]);
-                    } else {
-                        sites.add(this.sites[dieNumber][i][this.height - 2]);
+                        sites.add(this.sites[dieNumber][i][1]); // Bottom side for die 0
+                    } else if (dieNumber == this.totaldie - 1) {
+                        sites.add(this.sites[dieNumber][i][this.height - 2]); // Top side for the last die
                     }
                 }
             }
-        } else if(!blockType.equals(emptyType)) {
+        } else if (!blockType.equals(emptyType)) {
+            // Non-IO block types
             List<Integer> columns = this.columnsPerBlockType.get(blockType);
             int blockHeight = blockType.getHeight();
+
+            // Calculate number of sites needed for the block type across the dies
             sites = new ArrayList<>(columns.size() * (this.height - 2));
 
             for (Integer column : columns) {
-                for (int row = 2 ; row < this.height - 2 - blockHeight; row += blockHeight) {
-
-                        sites.add(this.sites[dieNumber][column][row]);
-
+                for (int row = 2; row < this.height - 2 - blockHeight; row += blockHeight) {
+                    // Add block sites for each die dynamically
+                    sites.add(this.sites[dieNumber][column][row]);
                 }
             }
         }
 
-
-        return sites; 
+        return sites;
     }
+
+//    }
     
     public List<AbstractSite> getVirtualSites(BlockType blockType, int dieNumber) {
+    	if(this.architecture.archCols == 1) {
+    		return this.getVirtualSitesSingleCol(blockType, dieNumber);
+    	}else if(this.architecture.archCols == 2) {
+    		return this.getVirtualSitesMultCol(blockType, dieNumber);
+    		
+    	}else {
+    		System.out.print("\nThe configuration is not supported");
+    		return null;
+    	}
+    
+    }
+    
+    public List<AbstractSite> getVirtualSitesSingleCol(BlockType blockType, int dieNumber) {
     	BlockType slltype = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
         List<AbstractSite> virtualSites = new ArrayList<AbstractSite>((this.width-1) * this.sllRows);
         int blockHeight = 1; 
         if(blockType.equals(slltype)){
-        	for(int column = 1; column < this.width - 1; column++) {
-   	         int startRow = (dieNumber == 0) ? this.height - 1 - this.sllRows : 0;
-   	         int endRow = (dieNumber == 0) ? this.height - 1 : this.sllRows;
-   	
-   	         for (int row = startRow; row < endRow; row++) {
-         		if(!(this.virtualSites[dieNumber][column][row] == null)) {
-        			virtualSites.add(this.virtualSites[dieNumber][column][row]);
-        		}
-   	         }
-        	}
+            if(dieNumber == 0 || dieNumber == (this.totaldie -1)) {
+            	if(dieNumber == 0) {
+                    for (int col = 1; col < this.width - 1; col++) {
+                        for (int row = this.height - this.sllRows; row < this.height; row++) {
+                        	if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                    			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                    		}
+                        }
+                    }
+            	}else {
+                    for (int col = 1; col < this.width - 1; col++) {
+                        for (int row = 0; row < this.sllRows; row++) {
+                        	if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                    			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                    		}
+                        }
+                    }
+            	}
+            }else {
+            	//middle region, add at both.
+            	if(height > (2*this.sllRows)) {
+            		for (int col = 1; col < this.width - 1; col++) {
+                        for (int row = this.height - this.sllRows; row < this.height; row++) {
+                        	if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                    			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                    		}
+                        }
+                    }
+            		
+            		for (int col = 1; col < this.width - 1; col++) {
+                        for (int row = 0; row < this.sllRows; row++) {
+                        	if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                    			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                    		}
+                        }
+                    }
+            		
+            	}else {
+            		for (int col = 1; col < this.width - 1; col++) {
+                        for (int row = 0; row < this.height; row++) {
+                        	if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                    			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                    		}
+                        }
+                    }
+            	}
+            	
+            }	
+   
         }
-
 		return virtualSites;
     }
+    
+    public List<AbstractSite> getVirtualSitesMultCol(BlockType blockType, int dieNumber) {
+    	BlockType slltype = BlockType.getBlockTypes(BlockCategory.SLLDUMMY).get(0);
+        List<AbstractSite> virtualSites = new ArrayList<AbstractSite>((this.width-1) * this.sllRows * 2);
+        if(blockType.equals(slltype)){
+        	if(dieNumber == 0 || dieNumber == 2) {
+        		for(int row = 1; row < this.height; row++) {
+        			for(int col = this.width - this.sllRows; col < this.width - 1; col ++) {
+        				if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                		}
+        			}
+        		}
+        	}
+        	
+        	if(dieNumber == 1 || dieNumber == 3) {
+        		for(int row = 0; row < this.height; row++) {
+        			for(int col = 1; col < this.sllRows; col ++) {
+        				if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                		}
+        			}
+        		}
+        	}
+        	
+        	
+        	if(dieNumber == 0 || dieNumber == 1) {
+                for (int col = 1; col < this.width - 1; col++) {
+                    for (int row = this.height - this.sllRows; row < this.height; row++) {
+                    	if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                		}
+                    }
+                }
+        	}
+        	
+        	if(dieNumber == 2 || dieNumber == 3) {
+                for (int col = 1; col < this.width - 1; col++) {
+                    for (int row = 0; row < this.sllRows; row++) {
+                    	if(!(this.virtualSites[dieNumber][col][row] == null)) {
+                			virtualSites.add(this.virtualSites[dieNumber][col][row]);
+                		}
+                    }
+                }
+        	}
+        }
+           
+    	return virtualSites;
+    }
+    
     public List<Integer> getColumnsPerBlockType(BlockType blockType) {
         return this.columnsPerBlockType.get(blockType);
     }

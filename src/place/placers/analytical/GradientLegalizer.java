@@ -103,7 +103,7 @@ class GradientLegalizer extends Legalizer {
     	}
     }
 
-    protected void legalizeBlockType(int blocksStart, int blocksEnd) {
+    protected void legalizeBlockType(int blocksStart, int blocksEnd, int dieCounter) {
     	double stepSize = this.getSettingValue("step_size");
     	
     	if(this.isLastIteration){

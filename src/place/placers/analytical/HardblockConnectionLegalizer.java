@@ -35,6 +35,7 @@ public class HardblockConnectionLegalizer{
     private final int gridWidth, gridHeigth;
 
     private Logger logger;
+    private int archCols, archRows;
 
 	HardblockConnectionLegalizer(
 			Circuit circuit,
@@ -61,6 +62,8 @@ public class HardblockConnectionLegalizer{
 		this.gridWidth = gridWidth;
 		this.gridHeigth = gridHeight;
 
+		this.archCols = this.circuit.getArchitecture().archCols;
+		this.archRows = this.circuit.getArchitecture().archRows;
 		//Count the number of nets
 		int maxFanout = 100;
 		this.logger.println("Nets with fanout larger than " + maxFanout + " are left out:");
@@ -95,7 +98,7 @@ public class HardblockConnectionLegalizer{
 		this.logger.println();
 
 		//Make all objects and connect them
-
+		//System.out.print("\nLegal X length is " + legalX.length);
 		this.blocks = new Block[legalX.length];
 		this.nets = new Net[numNets];
 		this.makeNets(placerNets, maxFanout);
@@ -297,26 +300,94 @@ public class HardblockConnectionLegalizer{
 		Net[] legalizeNets = this.netsPerBlocktype.get(this.blockType);
 		Site[] legalizeSites = new Site[ ((this.gridWidth-2) + (2*(this.gridHeigth - 2))) * siteCapacity];
 		int l = 0;
-
-
-		for(int i = 1; i < this.gridHeigth - 1; i++){
-			for(int p = 0; p < siteCapacity; p++){
-				legalizeSites[l++] = new Site(1, i, this.blockType.getHeight());
-				legalizeSites[l++] = new Site(this.gridWidth - 2, i, this.blockType.getHeight());
-			}
-		}
-			
-		for(int i = 1; i < this.gridWidth - 1; i++){
-			for(int p = 0; p < siteCapacity; p++){
-				if(CurrentDie == 0) {
-					
-					legalizeSites[l++] = new Site(i, 1, this.blockType.getHeight());
-				}else if(CurrentDie == 1) {
-					legalizeSites[l++] = new Site(i, this.gridHeigth - 2, this.blockType.getHeight());
+		
+		if(this.archCols == 1) {
+			for(int i = 1; i < this.gridHeigth - 1; i++){
+				for(int p = 0; p < siteCapacity; p++){
+					legalizeSites[l++] = new Site(1, i, this.blockType.getHeight());
+					legalizeSites[l++] = new Site(this.gridWidth - 2, i, this.blockType.getHeight());
 				}
-
 			}
+			for(int i = 1; i < this.gridWidth - 1; i++){
+				for(int p = 0; p < siteCapacity; p++){
+					if(CurrentDie == 0) {
+						
+						legalizeSites[l++] = new Site(i, 1, this.blockType.getHeight());
+					}else if(CurrentDie == this.circuit.getTotalDie() -1) {
+						legalizeSites[l++] = new Site(i, this.gridHeigth - 2, this.blockType.getHeight());
+					}
+				}
+			}
+			
+		}else if(this.archCols == 2) {
+			
+			if(CurrentDie == 0) {
+				for(int i = 1; i < this.gridHeigth - 1; i++){
+					for(int p = 0; p < siteCapacity; p++){
+						legalizeSites[l++] = new Site(1, i, this.blockType.getHeight());
+					}
+				}
+				for(int i = 1; i < this.gridWidth - 1; i++){
+					for(int p = 0; p < siteCapacity; p++){
+						legalizeSites[l++] = new Site(i, 1, this.blockType.getHeight());
+					}
+				}
+			}
+			
+			else if(CurrentDie == 1) {
+				for(int i = 1; i < this.gridHeigth - 1; i++){
+					for(int p = 0; p < siteCapacity; p++){
+						legalizeSites[l++] = new Site(this.gridWidth - 2, i, this.blockType.getHeight());
+					}
+				}
+				for(int i = 1; i < this.gridWidth - 1; i++){
+					for(int p = 0; p < siteCapacity; p++){
+						legalizeSites[l++] = new Site(i, 1, this.blockType.getHeight());
+					}
+				}
+			}
+			
+			else if(CurrentDie == 2) {
+				for(int i = 1; i < this.gridHeigth - 1; i++){
+					for(int p = 0; p < siteCapacity; p++){
+						legalizeSites[l++] = new Site(1, i, this.blockType.getHeight());
+					}
+				}
+				for(int i = 1; i < this.gridWidth - 1; i++){
+					for(int p = 0; p < siteCapacity; p++){
+						legalizeSites[l++] = new Site(i, this.gridHeigth - 2, this.blockType.getHeight());
+					}
+				}
+			}
+			
+			else if(CurrentDie == 3) {
+				for(int i = 1; i < this.gridHeigth - 1; i++){
+					for(int p = 0; p < siteCapacity; p++){
+						legalizeSites[l++] = new Site(this.gridWidth - 2, i, this.blockType.getHeight());
+					}
+				}
+				for(int i = 1; i < this.gridWidth - 1; i++){
+					for(int p = 0; p < siteCapacity; p++){
+						legalizeSites[l++] = new Site(i, this.gridHeigth - 2, this.blockType.getHeight());
+					}
+				}
+			}
+			
+		}else {
+			System.out.print("\nThis configuration is not supported");
 		}
+
+		
+		
+		//To remove anynull ocurences
+		List<Site> filteredList = new ArrayList<>();
+		for (Site site : legalizeSites) {
+		    if (site != null) {
+		        filteredList.add(site);
+		    }
+		}
+
+		legalizeSites = filteredList.toArray(new Site[0]);
 		
 		//Update the coordinates of the current hard block type based on the current linear placement
 		this.initializeLegalization(legalizeNets);
@@ -377,7 +448,29 @@ public class HardblockConnectionLegalizer{
 				legalizeSites[cols][rows] = new Site(cols, rows, this.blockType.getHeight());
 			}
 		}
-
+//		for(int rows = rowStart; rows<rowEnd; rows++) {
+//			for(int cols = 1; cols < this.gridWidth; cols++) {
+//				//System.out.print("\nThe row is " + rows + " and the column is " + cols);
+//				legalizeSites[rows][cols] = new Site(cols, rows, this.blockType.getHeight());
+//			}
+//		}
+//		for(int cols = 1; cols < this.gridWidth; cols++) {
+//			for(int rows = rowStart; rows<rowEnd; rows++) {
+//				legalizeSites[cols][rows] = new Site(cols, rows, this.blockType.getHeight());
+//			}
+//		}
+//		for(int rows = 0; rows<=35; rows++) {
+//			for(int cols = rows; cols <= this.gridWidth; cols++){
+//				//for(int p = 0; p < siteCapacity; p++){
+//				//	legalizeSites[l++] = new Site(i, 0, this.blockType.getHeight());
+//				if(CurrentDie == 0) {
+//					legalizeSites[l++] = new Site(cols, this.gridHeigth + 1, this.blockType.getHeight());
+//				}else if(CurrentDie == 1) {
+//					legalizeSites[l++] = new Site(cols, 0, this.blockType.getHeight());
+//				}
+//				//}
+//			}
+//		}
 
 	
 	
@@ -403,7 +496,39 @@ public class HardblockConnectionLegalizer{
 				}
 			}
 			
-
+//			for(int rows = rowStart; rows<rowEnd; rows++) {
+//				for(Site site:legalizeSites[rows]) {
+//					System.out.print("\nThe site is " + site);
+//					if(!site.hasBlock()){
+//						double cost = (site.column - block.linearX) * (site.column - block.linearX) + (site.row - block.linearY) * (site.row - block.linearY);
+//						if(cost < minimumCost){
+//							minimumCost = cost;
+//							bestFreeSite = site;
+//						}
+//					}
+//				}
+//			}
+			
+//			for(int cols = 1; cols < this.gridWidth; cols++) {
+//				for(Site site:legalizeSites[cols]) {
+//					if(!site.hasBlock()){
+//						double cost = (site.column - block.linearX) * (site.column - block.linearX) + (site.row - block.linearY) * (site.row - block.linearY);
+//						if(cost < minimumCost){
+//							minimumCost = cost;
+//							bestFreeSite = site;
+//						}
+//					}
+//				}
+//			}
+//			for(Site site:legalizeSites){
+//				if(!site.hasBlock()){
+//					double cost = (site.column - block.linearX) * (site.column - block.linearX) + (site.row - block.linearY) * (site.row - block.linearY);
+//					if(cost < minimumCost){
+//						minimumCost = cost;
+//						bestFreeSite = site;
+//					}
+//				}
+//			}
 			block.setSite(bestFreeSite);
 			bestFreeSite.setBlock(block);
 			

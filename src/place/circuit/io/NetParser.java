@@ -10,6 +10,7 @@ import place.circuit.block.AbstractBlock;
 import place.circuit.block.GlobalBlock;
 import place.circuit.block.LeafBlock;
 import place.circuit.block.LocalBlock;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.pin.AbstractPin;
 
 import place.circuit.pin.GlobalPin;
@@ -31,7 +32,8 @@ public class NetParser {
 
     private Map<BlockType, List<AbstractBlock>> blocks;
     private Map<String, AbstractBlock> SLLDummyBlocks;
-    // blockStack is a LinkedList because we want to be able to peekLast()
+    private List<AbstractBlock> localSLLBlocks;
+    private Map<String, SLLNetBlocks> netToBlockSLL;
     private LinkedList<AbstractBlock> blockStack;
     private Stack<TupleBlockMap> inputsStack;
     private Stack<Map<String, String>> outputsStack;
@@ -67,11 +69,13 @@ public class NetParser {
 
     public Circuit parse(int dieCounter) throws IOException {
         // A list of all the blocks in the circuit
+    	this.dieNum = dieCounter;
         this.blocks = new HashMap<BlockType, List<AbstractBlock>>();
         this.SLLDummyBlocks = new HashMap<String, AbstractBlock>();
+        this.localSLLBlocks = new ArrayList<AbstractBlock>();
         this.SLLNets = new ArrayList<String>();
         this.sllNetInfo = new HashMap<String, sllNet>();
-
+        this.netToBlockSLL = new HashMap<String, SLLNetBlocks>();
         this.SllBlockNum = 0;
         // blockStack is a stack that contains the current block hierarchy.
         // It is used to find the parent of a block. outputsStack contains
@@ -122,7 +126,7 @@ public class NetParser {
             			this.SLLNets.add(SLLConn);
             			sllNet newSLL = new sllNet(SLLConn,null,new ArrayList<AbstractPin>());
             			this.sllNetInfo.put(SLLConn, newSLL);
-     
+            			this.netToBlockSLL.put(SLLConn, new SLLNetBlocks(SLLConn));
             		}
             	}
             	isSLL = false;
@@ -175,8 +179,7 @@ public class NetParser {
         this.addSLLBlocks();
 
         Circuit circuit = new Circuit(this.circuitName, this.architecture, this.blocks, this.TotDie, dieCounter, this.SLLRows);
-        circuit.initializeData(dieCounter);
-
+        circuit.initializeData();
         return circuit;
     }
 
@@ -342,7 +345,9 @@ public class NetParser {
     	int sourcePinIndex = 0;
     	AbstractPin SourcePin,TerminalPin = null;
     	AbstractPin globalSourcePin = null;
-
+    	SLLNetBlocks sllBlockInfo = this.netToBlockSLL.get(SLLNet);
+    	
+    	
     	if(this.SLLDummyBlocks.containsKey(BlockName)) {
    
     		dummyBlock = this.SLLDummyBlocks.get(BlockName);
@@ -362,6 +367,10 @@ public class NetParser {
 	        		GlobalPin netSink = (GlobalPin)ALBPin;
 	        		netSink.setNetName(SLLConn);
 	        		dummyBlock.setSLLsource(true);
+	        		sllBlockInfo.addDummySource(netSource);
+	        		sllBlockInfo.addSinkPins(netSink);
+	        		netSink.getOwner().isSLLSink = true;
+	        
         		}
     		}else if(ALBPin.isOutput()) {
     			globalSourcePin = GetGlobalPin(SLLConn);
@@ -379,8 +388,10 @@ public class NetParser {
     			netSink.setNetName(SLLConn);
     			dummyBlock.setSLLsink(true);
     			dummyBlock.setSLLsource(false); //Since the block is assigned as the sink, it cannot be the source anymore.
-
-
+    			sllBlockInfo.addDummySink(netSink);
+    			sllBlockInfo.setSourcePin(netSource);
+    			netSource.getOwner().isSLLSource = true;
+	
     		}
     	}else {
     		dummyBlock = new GlobalBlock(BlockName, SLLBlocktype, this.SllBlockNum, true);
@@ -399,11 +410,13 @@ public class NetParser {
 	        		netSink.setNetName(SLLConn);
 
         			dummyBlock.setSLLsource(true);
+	        		sllBlockInfo.addDummySource(netSource);
+	        		sllBlockInfo.addSinkPins(netSink);
+	        		netSink.getOwner().isSLLSink = true;
         		}
     		}else if(ALBPin.isOutput()) {
-
-    			globalSourcePin = GetGlobalPin(SLLConn);
-
+    			
+    			globalSourcePin = GetGlobalPin(SLLConn);        		
     			   			
     			String sourcePortName = "datain";
 
@@ -420,7 +433,9 @@ public class NetParser {
     			netSink.setNetName(SLLConn);
     			dummyBlock.setSLLsink(true);
     			dummyBlock.setSLLsource(false); //Since the block is assigned as the sink, it cannot be the source anymore.
-
+    			sllBlockInfo.addDummySink(netSink);
+    			sllBlockInfo.setSourcePin(netSource);
+    			netSource.getOwner().isSLLSource = true;
     		}
     		this.SllBlockNum++;
     		
@@ -702,7 +717,9 @@ public class NetParser {
         }
 	  }
     }
-    
+    public Map<String, SLLNetBlocks> getSllNetInfo(){
+    	return this.netToBlockSLL;
+    }
     class sllNet{
     	String netname;
     	AbstractPin sourceSLL;
@@ -722,8 +739,11 @@ public class NetParser {
     	void setSLLsource(AbstractPin sourceSLL) {
     		this.sourceSLL = sourceSLL;
     	}
-    	void addSLLsink(AbstractPin sourceSLL) {
-    		this.sinkSLL.add(sourceSLL);
+    	void addSLLsink(AbstractPin sinkSLL) {
+    		if(!this.sinkSLL.contains(sinkSLL)) {
+    			this.sinkSLL.add(sinkSLL);
+    		}
+    		
     	}
     }
 

@@ -1,4 +1,4 @@
-package place.main;
+ package place.main;
 
 import org.jfree.ui.RefineryUtilities;
 import org.xml.sax.SAXException;
@@ -9,6 +9,7 @@ import place.circuit.architecture.BlockCategory;
 import place.circuit.architecture.BlockType;
 import place.circuit.architecture.ParseException;
 import place.circuit.block.GlobalBlock;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.exceptions.InvalidFileFormatException;
 import place.circuit.exceptions.PlacementException;
 import place.circuit.io.*;
@@ -33,12 +34,19 @@ import java.io.IOException;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class Main {
 
@@ -50,11 +58,15 @@ public class Main {
     private File [] outputPlaceFileDie;
     private ArrayList<File> netFiles;
     private ArrayList<File> inputHierarchyFiles;
-
+    //TO GET TOTAL NUMBER OF DIES IN THE SYSTEM
     private Integer TotDie;
     private Integer SLLrows;
     private float SLLDelay;
-
+    private Integer archRows;
+    private Integer archCols;
+    
+    //TO GET THE CURRENT DIE
+    //private Integer CurrentDie;
     private Architecture architecture; 
     private File architectureFile;  
 
@@ -74,9 +86,10 @@ public class Main {
 
     private Map<String, Timer> timers = new HashMap<String, Timer>();
     private String mostRecentTimerName;
-    private Circuit circuit;
+    private Circuit[] circuit;
     private Circuit[] circuitDie;
-
+    private HashMap<String, SLLNetBlocks> netToBlockSLL = new HashMap<>();
+    private Map<String, SLLNetBlocks> maps[];
 
     private static final String
         O_ARCHITECTURE = "architecture file",
@@ -92,11 +105,14 @@ public class Main {
         O_VISUAL = "visual",
         O_RANDOM_SEED = "random seed",
     	O_NUM_DIE = "Number of dies",
+    	O_NUM_ARCH_ROWS = "Number of arch rows",
+    	O_NUM_ARCH_COLS = "Number of arch columns",
     	O_NUM_SLL_ROWS = "Number of SLL rows",
     	O_SLL_DELAY = "SLL delay";
     	
 
     //@SuppressWarnings("deprecation")
+	//@SuppressWarnings("deprecation")
 	public static void initOptionList(Options options) {
         options.add(O_ARCHITECTURE, "", File.class);
         options.add(O_BLIF_FILE, "", File.class);
@@ -105,7 +121,9 @@ public class Main {
         options.add(O_INPUT_PLACE_FILE, "if omitted the initial placement is random", File.class, Required.FALSE);
         options.add(O_INPUT_HIERARCHY_FILE, "if omitted no hierarchy information is used", ArrayList.class, Required.FALSE);
         options.add(O_NUM_DIE, "Number of dies chosen as 2", new Integer(2));
-        options.add(O_NUM_SLL_ROWS, "Number of SLL rows default set to 5", new Integer(36));
+        options.add(O_NUM_SLL_ROWS, "Number of SLL rows default set to 36", new Integer(36));
+        options.add(O_NUM_ARCH_ROWS, "Number of arch rows default set to 1", new Integer(1));
+        options.add(O_NUM_ARCH_COLS, "Number of arch cols default set to 2", new Integer(2));
         options.add(O_SLL_DELAY, "Delay through SLL connection", new Float(1000e-12));
         options.add(O_PARTIAL_PLACE_FILE, "placement of a part of the blocks", File.class, Required.FALSE);      
         options.add(O_OUTPUT_PLACE_FILE, "(default: based on the blif file)", File.class, Required.FALSE);
@@ -134,13 +152,15 @@ public class Main {
         this.SLLrows = options.getInteger(O_NUM_SLL_ROWS);
         this.SLLDelay = options.getFloat(O_SLL_DELAY);
         this.inputPlaceFile = options.getFile(O_INPUT_PLACE_FILE);
-
+        this.archCols = options.getInteger(O_NUM_ARCH_COLS);
+        this.archRows = options.getInteger(O_NUM_ARCH_ROWS);
+        //Multi die hierarchy file
         this.inputHierarchyFiles = options.getFiles(O_INPUT_HIERARCHY_FILE);
         this.partialPlaceFile = options.getFile(O_PARTIAL_PLACE_FILE);
 
         this.blifFile = options.getFile(O_BLIF_FILE);
         this.netFiles = options.getFiles(O_NET_FILE);
-
+       // this.architectureFile = options.getFiles(O_ARCHITECTURE);
         this.outputPlaceFile = options.getFile(O_OUTPUT_PLACE_FILE);
         this.outputPlaceFileDie = new File[this.TotDie];
 
@@ -203,28 +223,44 @@ public class Main {
         }
     }
 
-    public void runPlacements(){
+    public void runPlacements() throws InterruptedException, Exception{
     	this.netFileDie = new File[this.TotDie];
     	this.circuitDie = new Circuit[this.TotDie];
+    	this.circuit  = new Circuit[this.TotDie];
+    	this.maps = new HashMap[this.TotDie];
         String totalString = "Total flow took";
-        String ArchParsing = "\nArchitecture parsing";
+        String ArchParsing = "Architecture parsing";
         this.startTimer(totalString);
         this.startTimer(ArchParsing);
         this.loadArchitecture();
         this.stopAndPrintTimer(ArchParsing);
         
+       
+        int cores = Runtime.getRuntime().availableProcessors();
+        int poolSize = Math.min(this.TotDie, cores * 2);  // Safe upper bound
         String loadCircuit = "Loading the Netlist for both dies took";
         this.startTimer(loadCircuit);
+        int dieCount = this.TotDie;
+	      
+	StringBuilder localOutput = new StringBuilder();      
+        int numThreads = Runtime.getRuntime().availableProcessors();
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+	      
+	      List<Future<String>> futures = new ArrayList<>();
+	      for (int i = 0; i < dieCount; i++) {
+	    	    futures.add(executor.submit(new parallelReadNet(i)));  // submit Callable, not run it manually
+	    	}
 
-	      int dieCount = this.TotDie;
-        StringBuilder localOutput = new StringBuilder();
-	      ExecutorService executor = Executors.newFixedThreadPool(2);
-	      for (int i = 0; i < dieCount; i++) {  
-	          Runnable worker = new parallelReadNet(i, localOutput);  
-	          executor.execute(worker);
-	        }  
-	      executor.shutdown();  
-	      while (!executor.isTerminated()) {   } 
+	      executor.shutdown();
+	      executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+
+	      // Collect and merge
+	      StringBuilder finalOutput = new StringBuilder();
+	      for (Future<String> future : futures) {
+	          finalOutput.append(future.get());  // get() waits for thread to finish and retrieves output
+	      }
+//	      System.out.print(localOutput);
+	      
         System.out.print(localOutput);
         this.stopAndPrintTimer(loadCircuit);
         String timingGraph = "Building the system level timing graph took";
@@ -259,7 +295,7 @@ public class Main {
     }
     public void TimingGraphSystem(Circuit[] circuitdie) {
     	System.out.print("\nBuilding the system level graph\n ");
-    	this.timingGraphSLL = new TimingGraphSLL(circuitdie, this.TotDie);
+    	this.timingGraphSLL = new TimingGraphSLL(circuitdie, this.architecture ,this.TotDie);
     	this.timingGraphSLL.build();
     }
     
@@ -267,55 +303,67 @@ public class Main {
     public void runPlacement(Circuit[] circuit) {
 
     	this.visualizer = new PlacementVisualizer[this.TotDie];
+    	String initialiseplace = "Initialise placement took";
+    	this.startTimer(initialiseplace);
 
-    	int dieCounter = 0;
+    	// Create thread pool
+    	int numThreads = Runtime.getRuntime().availableProcessors();
+    	ExecutorService executor = Executors.newFixedThreadPool(numThreads);
 
-    	while(dieCounter < this.TotDie) {
+    	// Use a list of Futures if you want to wait for each task
+    	List<Future<?>> futures = new ArrayList<>();
 
-    		// Enable the visualizer
-    		this.visualizer[dieCounter] = new PlacementVisualizer(this.logger);
-            if(this.visual) {
-                this.visualizer[dieCounter].setCircuit(this.circuitDie[dieCounter]);
+    	for (int dieIndex = 0; dieIndex < this.TotDie; dieIndex++) {
+    	    final int index = dieIndex;  // Required because of lambda scoping
 
-           }
-             
-            
-         // Read the place file
-            if(this.partialPlaceFile != null) {
-                PlaceParser placeParser = new PlaceParser(this.circuitDie[dieCounter], this.partialPlaceFile);
-                try {
-                    placeParser.iohbParse();
-                } catch(IOException | BlockNotFoundException | PlacementException | IllegalSizeException error) {
-                    this.logger.raise("Something went wrong while parsing the partial place file", error);
-                }
-                this.options.insertRandomPlacer();
-            }else if(this.inputPlaceFile != null){
-                this.startTimer("Placement parser");
-                PlaceParser placeParser = new PlaceParser(this.circuitDie[dieCounter], this.inputPlaceFile);
-                try {
-                    placeParser.parse();
-                } catch(IOException | BlockNotFoundException | PlacementException | IllegalSizeException error) {
-                    this.logger.raise("Something went wrong while parsing the place file", error);
-                }
-                this.stopTimer();
-                this.printStatistics("Placement parser", false);
-            }
+    	    Future<?> future = executor.submit(() -> {
+    	        // Initialize visualizer
+    	        PlacementVisualizer vis = new PlacementVisualizer(this.logger);
+    	        this.visualizer[index] = vis;
 
-            if(this.inputHierarchyFile != null){
-            	HierarchyParser hierarchyParser = new HierarchyParser(this.circuitDie[dieCounter], this.inputHierarchyFile);
-            	try {
-            		hierarchyParser.parse();
-            	} catch(IOException error) {
-                     this.logger.raise("Something went wrong while parsing the hierarchy file", error);
-    			}
-            }
-            
-            dieCounter++;
-            //Garbage collection
-            System.gc();
-            
-           
+    	        if (this.visual) {
+    	            vis.setCircuit(this.circuitDie[index]);
+    	        }
+
+    	        try {
+    	            if (this.partialPlaceFile != null) {
+    	                PlaceParser placeParser = new PlaceParser(this.circuitDie[index], this.partialPlaceFile);
+    	                placeParser.iohbParse();
+    	                this.options.insertRandomPlacer();
+    	            } else if (this.inputPlaceFile != null) {
+    	                this.startTimer("Placement parser");
+    	                PlaceParser placeParser = new PlaceParser(this.circuitDie[index], this.inputPlaceFile);
+    	                placeParser.parse();
+    	                this.stopTimer();
+    	                this.printStatistics("Placement parser", false);
+    	            }
+
+    	            if (this.inputHierarchyFile != null) {
+    	                HierarchyParser hierarchyParser = new HierarchyParser(this.circuitDie[index], this.inputHierarchyFile);
+    	                hierarchyParser.parse();
+    	            }
+    	        } catch (IOException | BlockNotFoundException | PlacementException | IllegalSizeException error) {
+    	            this.logger.raise("Error processing die " + index, error);
+    	        }
+    	    });
+
+    	    futures.add(future);
     	}
+
+    	// Wait for all threads to complete
+    	for (Future<?> f : futures) {
+    	    try {
+    	        f.get();
+    	    } catch (Exception e) {
+    	        e.printStackTrace();  // Or handle appropriately
+    	    }
+    	}
+
+    	executor.shutdown();
+    	this.stopAndPrintTimer(initialiseplace);
+
+    	
+    	//Raveena : Not accepting any initial placement data hence set up the random placer here instead of previous place
     	this.options.insertRandomPlacer();
 
         int numPlacers = this.options.getNumPlacers();
@@ -363,7 +411,9 @@ public class Main {
                 this.netFile,
                 this.TotDie,
                 this.SLLrows,
-                this.SLLDelay);//this.netFile);
+                this.SLLDelay,
+                this.archRows,
+                this.archCols);//this.netFile);
 
         try {
             architecture.parse();
@@ -395,22 +445,22 @@ public class Main {
         try {
 
             NetParser netParser = new NetParser(this.architecture, this.circuitName, NetFile, this.TotDie, dieCounter , this.SLLrows);
-            this.circuit = netParser.parse(dieCounter);
 
-            localOutput.append(this.circuit.stats());
+            this.circuit[dieCounter] = netParser.parse(dieCounter);
+            this.maps[dieCounter] = netParser.getSllNetInfo();
+            this.logger.println(this.circuit[dieCounter].stats());
 
         } catch(IOException error) {
             this.logger.raise("Failed to read net file", error);
         }
 
         localOutput.append("\n");
-
-        this.printNumBlocks(localOutput);
-        return this.circuit;
+        this.printNumBlocks(localOutput, dieCounter);
+        return this.circuit[dieCounter];
     }
 
 
-    private void printNumBlocks(StringBuilder localOutput) {
+    private void printNumBlocks(StringBuilder localOutput, int dieCounter) {
         int numLut = 0,
             numFf = 0,
             numClb = 0,
@@ -425,7 +475,7 @@ public class Main {
         	numMem = 0;
 
         int numPins = 0;
-        for(GlobalBlock block:this.circuit.getGlobalBlocks()){
+        for(GlobalBlock block:this.circuit[dieCounter].getGlobalBlocks()){
         	numPins += block.numClockPins();
         	numPins += block.numInputPins();
         	numPins += block.numOutputPins();
@@ -434,7 +484,7 @@ public class Main {
 
             String name = blockType.getName();
             BlockCategory category = blockType.getCategory();
-            int numBlocks = this.circuit.getBlocks(blockType).size();
+            int numBlocks = this.circuit[dieCounter].getBlocks(blockType).size();
             
             if(name.equals("lut")) {
                 numLut += numBlocks;
@@ -480,19 +530,27 @@ public class Main {
                 numIo += numBlocks;
             }
         }
-        localOutput.append("Circuit statistics:");
-        localOutput.append(String.format("   clb: %d\n      lut: %d\n      ff: %d\n   SLL: %d\n   hardblock: %d\n      PLL: %d\n      DSP: %d\n      Memory: %d\n      M9K: %d\n      M144K: %d\n   io: %d\n\n",
+        System.out.print("Circuit statistics:");
+        System.out.print(String.format("   clb: %d\n      lut: %d\n      ff: %d\n   SLL: %d\n   hardblock: %d\n      PLL: %d\n      DSP: %d\n      Memory: %d\n      M9K: %d\n      M144K: %d\n   io: %d\n\n",
                 numClb, numLut, numFf, numSLL, numHardBlock, numPLL, numDSP, numMem, numM9K, numM144K, numIo));
-        localOutput.append(String.format("   CLB usage ratio: " + String.format("%.3f",this.circuit.ratioUsedCLB())  + "\n"));
-        localOutput.append(String.format("   Num pins: " + numPins + "\n\n"));
-
+        System.out.print(String.format("   CLB usage ratio: " + String.format("%.3f",this.circuit[dieCounter].ratioUsedCLB())  + "\n"));
+        System.out.print(String.format("   Num pins: " + numPins + "\n\n"));
+        
+//        System.out.print("\nThe die " + dieCounter +" has SLL count of " + numSLL);
+//        localOutput.append("Circuit statistics:");
+//        localOutput.append(String.format("   clb: %d\n      lut: %d\n      ff: %d\n   SLL: %d\n   hardblock: %d\n      PLL: %d\n      DSP: %d\n      Memory: %d\n      M9K: %d\n      M144K: %d\n   io: %d\n\n",
+//                numClb, numLut, numFf, numSLL, numHardBlock, numPLL, numDSP, numMem, numM9K, numM144K, numIo));
+//        localOutput.append(String.format("   CLB usage ratio: " + String.format("%.3f",this.circuit[dieCounter].ratioUsedCLB())  + "\n"));
+//        localOutput.append(String.format("   Num pins: " + numPins + "\n\n"));
+//        this.logger.print("   CLB usage ratio: " + String.format("%.3f",this.circuit.ratioUsedCLB())  + "\n");
+//        this.logger.print("   Num pins: " + numPins + "\n\n");
     }
 
 
     private void timePlacement(int placerIndex) {
         long seed = this.randomSeed;
         Random random = new Random(seed);
-        Placer placer = this.options.getPlacer(placerIndex, this.circuitDie, random, this.visualizer, this.TotDie, this.SLLrows, this.timingGraphSLL);
+        Placer placer = this.options.getPlacer(placerIndex, this.circuitDie, random, this.visualizer, this.TotDie, this.SLLrows, this.timingGraphSLL, this.netToBlockSLL);
         String placerName = placer.getName();
 
         this.startTimer(placerName);
@@ -618,7 +676,7 @@ public class Main {
         }
         this.logger.print("\n========= Starting System level BB cost calculation ============");
         this.logger.println();
-        EfficientBoundingBoxNetCC SLLCC = new EfficientBoundingBoxNetCC(this.circuitDie, this.TotDie , this.SLLrows);
+        EfficientBoundingBoxNetCC SLLCC = new EfficientBoundingBoxNetCC(this.circuitDie, this.TotDie , this.SLLrows, this.archRows, this.archCols);
         double SLLWLcost = SLLCC.calculateTotalSLLCost();
         this.logger.printf(format, "SLL BB cost", SLLWLcost, "");
         totalWLCostDie += SLLWLcost;
@@ -646,11 +704,11 @@ public class Main {
     	this.printDistance("Test");
     }
     private void printDistance(String type){
-    	int maxFPGADistance = this.circuit.getWidth() + this.circuit.getHeight();
+    	int maxFPGADistance = this.circuit[0].getWidth() + this.circuit[0].getHeight();
     	Map<Integer, int[]> distanceCharts = new HashMap<Integer, int[]>();
-    	for(GlobalBlock sourceBlock:this.circuit.getGlobalBlocks()){
+    	for(GlobalBlock sourceBlock:this.circuit[0].getGlobalBlocks()){
     		if(!sourceBlock.getLeafNode().isFloating()){
-    			for(GlobalBlock sinkBlock:this.circuit.getGlobalBlocks()){
+    			for(GlobalBlock sinkBlock:this.circuit[0].getGlobalBlocks()){
     				if(!sinkBlock.getLeafNode().isFloating()){
     					if(sourceBlock.getIndex() != sinkBlock.getIndex()){
             				int fpgaDistance = this.fpgaDistance(sourceBlock, sinkBlock);
@@ -768,16 +826,19 @@ public class Main {
         this.logger.printf("Total garbage collections: %d\n", totalGarbageCollections);
         this.logger.printf("Total garbage collection time: %f s\n", garbageCollectionTime / 1000.0);
     }
-    class parallelReadNet implements Runnable{
+    class parallelReadNet implements Callable<String> {
     	int dieCounter;
     	StringBuilder localOutput;
-    	public parallelReadNet(int dieCounter,  StringBuilder localOutput) {
-    		this.dieCounter = dieCounter;
-    		this.localOutput = localOutput;
-    	}
-    	public void run() {
-    		NetlistParsing(this.dieCounter, this.localOutput);
-    		}
+    	 public parallelReadNet(int dieCounter) {
+    	        this.dieCounter = dieCounter;
+    	    }
+    	@Override
+        public String call() {
+            // Let this return the output instead of modifying a shared StringBuilder
+            StringBuilder localOutput = new StringBuilder();
+            NetlistParsing(this.dieCounter, localOutput);
+            return localOutput.toString();
+        }
     }
     
 

@@ -2,10 +2,12 @@ package place.placers.analytical;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 
 import place.circuit.Circuit;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.timing.TimingGraph;
 import place.circuit.timing.TimingGraphSLL;
 import place.interfaces.Logger;
@@ -53,8 +55,8 @@ public abstract class AnalyticalPlacerTD extends AnalyticalPlacer {
     private CriticalityCalculator[] criticalityCalculator;
 
     public AnalyticalPlacerTD(Circuit[] circuitDie, Options options, Random random, Logger logger, 
-    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSys) {
-        super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSys);
+    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSys,HashMap<String, SLLNetBlocks>  netToBlockSLL) {
+        super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSys, netToBlockSLL);
 
         this.criticalityExponent[TotalDies] = options.getDouble(O_CRITICALITY_EXPONENT);
         this.criticalityThreshold[TotalDies] = options.getDouble(O_CRITICALITY_THRESHOLD);

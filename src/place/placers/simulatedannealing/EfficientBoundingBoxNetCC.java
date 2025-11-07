@@ -21,7 +21,7 @@ public class EfficientBoundingBoxNetCC {
     private ArrayList<EfficientBoundingBoxData> bbDataArraySLL;
     private int numPins;
     private int numBlockspair;
-
+    private int width, height;
 
     // Contains the blocks for which the associated boundingBox's might need to be reverted
     private List<GlobalBlock> toRevert = new ArrayList<>();
@@ -37,17 +37,21 @@ public class EfficientBoundingBoxNetCC {
 
             for(AbstractPin pin : block.getOutputPins()) {
             	
-                this.processPin((GlobalPin) pin);
+                this.processPin((GlobalPin) pin, circuit.getArchitecture().archRows, circuit.getArchitecture().archCols);
             }
         }
 
         this.bbDataArray.trimToSize();
     }   
     
-
-    public EfficientBoundingBoxNetCC(Circuit[] circuit, int dieCount, int SLLrows ) {
+    //This is for the SLL dummy blocks. As they dont have a physical connection existing between them, the pins are not considered
+    //block locations are sufficient.
+    public EfficientBoundingBoxNetCC(Circuit[] circuit, int dieCount, int SLLrows, int archrows, int archcols ) {
 
         this.bbDataArraySLL = new ArrayList<EfficientBoundingBoxData>();
+        //this.bbDataMapSLL = new HashMap<GlobalBlock, List<EfficientBoundingBoxData>>();
+        this.width = circuit[0].getWidth();
+        this.height = circuit[0].getHeight();
 
         Map<String,ArrayList<GlobalBlock>> dummyBlocks = new HashMap<String, ArrayList<GlobalBlock>>();
         String blockname;
@@ -67,22 +71,24 @@ public class EfficientBoundingBoxNetCC {
         }
         
         for(String sllname : dummyBlocks.keySet()) {
-        	this.processBlocks(dummyBlocks.get(sllname), dieCount, SLLrows);
+        	this.processBlocks(dummyBlocks.get(sllname), dieCount, SLLrows, archrows, archcols);
         }
         
 
         this.bbDataArraySLL.trimToSize();
     } 
 
-    private void processBlocks(ArrayList<GlobalBlock> SLLblocks, int dieCount ,int SLLrows) {
-    	this.numBlockspair++;
-    	GlobalBlock[] blockArray = new GlobalBlock[dieCount];
-    	blockArray = SLLblocks.toArray(blockArray);
+    private void processBlocks(ArrayList<GlobalBlock> SLLblocks, int dieCount ,int SLLrows, int archrows, int archcols) {
+    	if(SLLblocks.size()>1) {
+    		this.numBlockspair++;
+        	GlobalBlock[] blockArray = new GlobalBlock[SLLblocks.size()];
+        	blockArray = SLLblocks.toArray(blockArray);
+        	EfficientBoundingBoxData SLLBBData = new EfficientBoundingBoxData(blockArray, SLLrows, archrows, archcols, this.width, this.height); 
+        	this.bbDataArraySLL.add(SLLBBData);
+    	}
     	
-    	EfficientBoundingBoxData SLLBBData = new EfficientBoundingBoxData(blockArray, SLLrows); 
-    	this.bbDataArraySLL.add(SLLBBData);
     }
-    private void processPin(GlobalPin pin) {
+    private void processPin(GlobalPin pin, int archrows, int archcols) {
 
         int numSinks = pin.getNumSinks();
         if(numSinks == 0 || pin.getSink(0).getPortType().isClock()) {
@@ -90,7 +96,7 @@ public class EfficientBoundingBoxNetCC {
         }
         this.numPins++;
 
-        EfficientBoundingBoxData bbData = new EfficientBoundingBoxData(pin);
+        EfficientBoundingBoxData bbData = new EfficientBoundingBoxData(pin, archcols, archrows);
         this.bbDataArray.add(bbData);
 
 
@@ -127,7 +133,7 @@ public class EfficientBoundingBoxNetCC {
 
     public double calculateTotalCost() {
         double totalCost = 0.0;
-        System.out.print("\nThe size of bbData array is " + this.bbDataArray.size()+"\n");
+//        System.out.print("\nThe size of bbData array is " + this.bbDataArray.size()+"\n");
         for(int i = 0; i < this.numPins; i++) {
             totalCost += this.bbDataArray.get(i).getNetCost();
         }

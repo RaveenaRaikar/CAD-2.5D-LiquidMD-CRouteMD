@@ -37,15 +37,17 @@ public class TimingNode {
     private int lowLink;
     private boolean onStack;
     
+    private int dieIndex;
     private int clockDomain;
     private double clockDelay;
     private boolean SLLNode = false;
     private boolean SLLsink = false;
     private boolean SLLsource = false;
     
-    TimingNode(LeafBlock block, LeafPin pin, Position position, int clockDomain, double clockDelay) {
+    TimingNode(LeafBlock block, LeafPin pin, Position position, int clockDomain, double clockDelay, int dieID) {
         this.block = block;
         this.pin = pin;
+        this.dieIndex = dieID;
 
         this.globalBlock = block.getGlobalParent();
         this.globalBlock.addTimingNode(this);
@@ -56,13 +58,13 @@ public class TimingNode {
         this.clockDelay = clockDelay;
 
     }
-    TimingNode(GlobalBlock block, GlobalPin pin, Position position, int clockDomain, double clockDelay) {
-
+    TimingNode(GlobalBlock block, GlobalPin pin, Position position, int clockDomain, double clockDelay, int dieID) {
+    	//this.pin = (LeafPin) pin;
         this.gpin = pin;
 
         this.globalBlock = (GlobalBlock) block;
         this.globalBlock.addTimingNode(this);
-
+        this.dieIndex = dieID;
         this.position = position;
         
         this.clockDomain = clockDomain;
@@ -93,7 +95,9 @@ public class TimingNode {
         return this.position;
     }
     
-   
+    public int getDieID() {
+    	return this.dieIndex;
+    }
 
     private void addSource(TimingNode source, TimingEdge edge) {
 

@@ -8,6 +8,7 @@ import place.circuit.block.AbstractSite;
 import place.circuit.block.GlobalBlock;
 import place.circuit.block.IOSite;
 import place.circuit.block.Macro;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.block.Site;
 import place.circuit.exceptions.PlacementException;
 import place.circuit.timing.TimingEdge;
@@ -17,6 +18,7 @@ import place.circuit.timing.TimingNode.Position;
 import place.interfaces.Logger;
 import place.interfaces.Options;
 import place.placers.Placer;
+import place.placers.analytical.AnalyticalAndGradientPlacer.ParallelOptiLeg;
 import place.visual.PlacementVisualizer;
 
 import java.util.ArrayList;
@@ -42,11 +44,12 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
     protected List<List<BlockType>> blockTypes;
     protected List<List<Integer>> blockTypeIndexStarts;
     protected final Map<Integer,Map<GlobalBlock, NetBlock>> netBlocks;
+    private Map<String, SLLNetBlocks> netToBlockSLL = new HashMap<>();
     protected int[] numIOBlocks, numMovableBlocks;
     protected int[] numSLLBlocks;
     protected StringBuilder localOutput = new StringBuilder();
-    protected boolean Global_fix;
-    protected boolean Seperate_fix;
+//    protected boolean Global_fix;
+//    protected boolean Seperate_fix;
     protected int syncStep;
     protected TimingGraphSLL timingGraphSLL;
     
@@ -64,7 +67,8 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
     protected double[] timingCost;
     
     protected double[] currentCost, bestCost;
-    protected Map<String,List<Integer>> SLLcounter;
+//    protected Map<String, Map<Integer, Integer>> SLLcounter;
+    protected Map<String, List<BlockInfo>> SLLcounter;
     protected Map<String,Integer> sLLNodeList;
 
     private List<boolean[]> hasNets;
@@ -74,8 +78,8 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
     protected List<TimingNet>[] timingNets;
 
     private boolean[][] solveSeparate;
-    
-    private boolean[] dieSync;
+//    
+//    private boolean[] dieSync;
     
     protected boolean hasHierarchyInformation;
 
@@ -94,7 +98,7 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
         options.add(
         		O_SYNC_STEP,
                 "Synchronisation step for multithreading",
-                new Integer(1));
+                new Integer(1));  
         options.add(O_FIX_GLOBAL,
         		"Fixed SLL blocks in global",
         		Boolean.FALSE);
@@ -113,11 +117,11 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
 
 
     public AnalyticalAndGradientPlacer(Circuit[] circuitDie, Options options, Random random, Logger logger, 
-    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSLL) {	
-		super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSLL);
+    		PlacementVisualizer[] visualizer, int TotalDies, int SLLrows, TimingGraphSLL timingGraphSLL, HashMap<String, SLLNetBlocks> netToBlockSLL) {	
+		super(circuitDie, options, random, logger, visualizer, TotalDies, SLLrows, timingGraphSLL, netToBlockSLL);
 
-		this.Global_fix = options.getBoolean(O_FIX_GLOBAL);
-		this.Seperate_fix = options.getBoolean(O_FIX_SEPERATE);
+//		this.Global_fix = options.getBoolean(O_FIX_GLOBAL);
+//		this.Seperate_fix = options.getBoolean(O_FIX_SEPERATE);
         this.criticalityLearningRate = options.getDouble(O_CRIT_LEARNING_RATE);
         this.syncStep = options.getInteger(O_SYNC_STEP);
         this.hasHierarchyInformation = false;
@@ -125,7 +129,8 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
         this.SLLcounter = new HashMap<>();
         this.sLLNodeList = new HashMap<>();
         this.timingGraphSLL = timingGraphSLL;
-        this.timingGraphSLL.recalculateSystemTimingGraph();
+//        this.timingGraphSLL.recalculateSystemTimingGraph();
+        this.netToBlockSLL = netToBlockSLL;
         
         boolean flag = false;
         //Since the hierarchy file will exist for both the dies, it is fine to consider only one die for evaluation.
@@ -154,10 +159,13 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
     protected abstract void solveLinear(BlockType category, int iteration, int dieCounter);
     protected abstract void solveLegal(BlockType category, boolean isLastIteration,int dieCounter);
     protected abstract void calculateCost(int iteration, int dieCount);
+    //protected abstract void calculateCost(int iteration, int dieCount, double maxSysDelay);
     protected abstract boolean stopCondition(int iteration);
     protected abstract int numIterations();
     protected abstract void printLegalizationRuntime(int dieCounter);
     protected abstract void fixSLLblocks(BlockType category, int SLLrows);
+    protected abstract void fixSLLblocksLiquidMD(BlockType category, int SLLrows);
+    
     protected abstract void synchroniseSLLblocks(StringBuilder localOutput);
     protected abstract StringBuilder printStatistics(int iteration, double time, int dieCounter);
 
@@ -169,7 +177,11 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
     	String initialiseData = "Placer Initialisation";
     	this.startSystemTimer(initialiseData);
         int dieCount = 0;
-
+        // All the variables are in a loop with die count
+        // Count the number of blocks
+        // A macro counts as 1 block
+        
+        //numBlocks = new int[this.TotalDies];
         this.blockTypes = new ArrayList<>();
         this.blockTypeIndexStarts = new ArrayList<>();
         
@@ -187,7 +199,12 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
         this.numRealConn = new int[this.TotalDies];
         int numIterations = this.numIterations();
         this.solveSeparate = new boolean[this.TotalDies][numIterations];
-        this.dieSync = new boolean [numIterations];
+//        this.dieSync = new boolean [numIterations];
+        //this.SLLcounter =
+        //this.netBlocks = new HashMap<>();
+        
+       // this.leafNode = new double[this.TotalDies][];
+        
         
         this.linearX = new ArrayList<double[]>();
         this.linearY = new ArrayList<double[]>();
@@ -247,7 +264,9 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
            
             //If the value of leafNode is equal to -1 then the node has no hierarchy leaf node
             Arrays.fill(leafNodetemp, -1);
-
+            
+           
+           // this.heights = new int[this.TotalDies][numBlocks];
             
             int [] tempHeight = new int[numBlocks];
             Arrays.fill(tempHeight, 1);
@@ -262,6 +281,11 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
             for(BlockType blockType : this.circuitDie[dieCount].getGlobalBlockTypes()) {
                 for(AbstractBlock abstractBlock : this.circuitDie[dieCount].getBlocks(blockType)) {
                     GlobalBlock block = (GlobalBlock) abstractBlock;
+                	if (block.getSite().getdie() != dieCount) {
+                	    System.out.println("Block " + abstractBlock.getName() + 
+                	        " claims to belong to die " + block.getSite().getdie() + 
+                	        " but is being iterated in die loop for die " + dieCount + " is of type " + block.getType() + " "  + System.identityHashCode(block));
+                	}
                     // Blocks that are the first block of a macro (or that aren't
                     // in a macro) should get a movable position.
                     if(!block.isInMacro() || block.getMacroOffsetY() == 0) {
@@ -282,17 +306,45 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
                         if(this.hasHierarchyInformation){
                         	leafNodetemp[blockCounter] = block.getLeafNode().getIndex();
                         }
-                      
-                        this.netBlocks.get(dieCount).put(block, new NetBlock(blockCounter, offset, blockType));
+                        NetBlock netBlock = new NetBlock(blockCounter, offset, blockType);
+                        this.netBlocks.get(dieCount).put(block, netBlock);
                         
-                        if(block.getType().equals(sllBlockType)) {
-                        	String blockname = block.getName();
-                        	
-                        	if(this.SLLcounter.get(blockname) == null) {
-                        		this.SLLcounter.put(blockname, new ArrayList<Integer>());
-                        	}
-                        	this.SLLcounter.get(blockname).add(blockCounter);
- 
+                        block.netBlock = netBlock;
+
+                        
+                     // Check if the block is an SLL block
+                        if (block.getType().equals(sllBlockType)) {
+                            String blockname = block.getName();
+                            boolean isSource = false;
+				if(abstractBlock.isSLLSink()) {
+                            	isSource = true;
+                            }
+                            
+
+                            if (!this.SLLcounter.containsKey(blockname)) {
+                                this.SLLcounter.put(blockname, new ArrayList<>());
+                            }
+
+                            List<BlockInfo> dieList = this.SLLcounter.get(blockname);
+                            BlockInfo blockData = new BlockInfo(dieCount, blockCounter, isSource);
+//                            System.out.print("\nTHe block is " + blockname + " with counter " + blockCounter + " on die " + dieCount + " is source " + abstractBlock.isSLLSource() + " the sink is " + abstractBlock.isSLLSink() );
+                            if (isSource) {
+                            	// Check if a source block already exists
+                                boolean sourceExists = dieList.stream().anyMatch(info -> info.isSource);
+                                if (sourceExists) {
+                                    System.err.println("\nWarning: Source block already exists for " + blockname + "! Duplicate source found on die " + dieCount);
+                                    // You can also throw an exception or skip adding if desired
+                                    // throw new RuntimeException("Duplicate source block for " + blockname);
+                                } else {
+//                                	System.out.print("\nAdded for source");
+                                    dieList.add(0, new BlockInfo(dieCount, blockCounter, true));
+                                }                            	
+                            } else {
+                                // Append non-source blocks at the end
+                                dieList.add(blockData);
+                            }
+
+                            this.SLLcounter.put(blockname, dieList);
                         }
                         
                         
@@ -383,8 +435,8 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
             System.out.print("\nThe number of total nets for die " + dieCount + " is " + this.nets[dieCount].size() + "\n");
 
             double averageCLBusuage = (this.circuitDie[0].ratioUsedCLB() + this.circuitDie[1].ratioUsedCLB())/2;
-            Arrays.fill(this.dieSync, false);
-
+//            Arrays.fill(this.dieSync, false);
+           // if(this.circuitDie[dieCount].ratioUsedCLB() > 0.8) {
             int counter = this.syncStep;
             if(averageCLBusuage > 0.8) {  
 
@@ -411,22 +463,22 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
 
                         recalculationsString.append(".");
                     }
-                    if(!this.Seperate_fix) {
-                        if((i%2==0) ) {
-                          	 if ((i == 2 || counter == 0) && (i>0)) {
-                          		this.dieSync[i] =true;
-                           	counter = this.syncStep - 1;
-                          	 }else {
-                          		counter--;
-                          	}
-                          }else if(i%2==1) {
-                        	  if(!this.Global_fix) {
-                        		  this.dieSync[i] = true;
-                        	  }
-                          }
-                    }else if(!this.Global_fix) {
-                    	 this.dieSync[i] = true;
-                    }
+//                    if(!this.Seperate_fix) {
+//                        if((i%2==0) ) {
+//                          	 if ((i == 2 || counter == 0) && (i>0)) {
+//                          		this.dieSync[i] =true;
+//                           	counter = this.syncStep - 1;
+//                          	 }else {
+//                          		counter--;
+//                          	}
+//                          }else if(i%2==1) {
+//                        	  if(!this.Global_fix) {
+//                        		  this.dieSync[i] = true;
+//                        	  }
+//                          }
+//                    }else if(!this.Global_fix) {
+//                    	 this.dieSync[i] = true;
+//                    }
                     
                     
                 }
@@ -443,26 +495,26 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
                 		this.solveSeparate[dieCount][i] = true;
 
                 		recalculationsString.append("|");
-                    	  if(!this.Global_fix) {
-                    		  this.dieSync[i] = true;
-                    	  }
+//                    	  if(!this.Global_fix) {
+//                    		  this.dieSync[i] = true;
+//                    	  }
                 		
                 	}else{
                 		this.solveSeparate[dieCount][i] = false;
-                        if(!this.Seperate_fix) {
-                            if((i%2==0) ) {
-                              	 if ((i == 2 || counter == 0) && (i>0)) {
-                              		this.dieSync[i] =true;
-                               	counter = this.syncStep - 1;
-                              	 }else {
-                              		counter--;
-                              	}
-                              }else if(i%2==1) {
-                            	  if(!this.Global_fix) {
-                            		  this.dieSync[i] = true;
-                            	  }
-                              }
-                        }
+//                        if(!this.Seperate_fix) {
+//                            if((i%2==0) ) {
+//                              	 if ((i == 2 || counter == 0) && (i>0)) {
+//                              		this.dieSync[i] =true;
+//                               	counter = this.syncStep - 1;
+//                              	 }else {
+//                              		counter--;
+//                              	}
+//                              }else if(i%2==1) {
+//                            	  if(!this.Global_fix) {
+//                            		  this.dieSync[i] = true;
+//                            	  }
+//                              }
+//                        }
                 		recalculationsString.append(".");
                 	}
                 }
@@ -555,44 +607,58 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
     }
     
     @Override
-    protected void doPlacement() {
-    
+    protected void doPlacement() throws PlacementException {
     	
 
-	    int iteration = 0;
-	    boolean isLastIteration = false;
-	
-		String placetimer = "Placement took";
-		this.startSystemTimer(placetimer);
-	    System.out.print("\n");
-	    while(!isLastIteration) {
-        double timerBegin = System.nanoTime();
-        if(this.dieSync[iteration]) {
-        	String synctime = "Synchronisation took";
-        	this.startSystemTimer(synctime);
-			this.synchroniseSLLblocks(this.localOutput);
-			this.timingGraphSLL.recalculateSystemTimingGraph();
-			this.localOutput.append(this.stopandPrintSystemTimerNew(synctime));
-		}
-        int dieCounter = 2;
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        for (int i = 0; i < dieCounter; i++) {  
-        	Runnable worker = new ParallelOptiLeg(iteration,isLastIteration,timerBegin,i);  
-        	executor.execute(worker);  
-	    }  
-        executor.shutdown();  
-        while (!executor.isTerminated()) {   }  
-		    isLastIteration = this.stopCondition(iteration);
-		    iteration++;
-	    }
+        int iteration = 0;
+        boolean isLastIteration = false;
+
+    	String placetimer = "Placement took";
+    	this.startSystemTimer(placetimer);
+        System.out.print("\n");
+
+    	String sllLegal = "SLL legalization took";
+    	this.startSystemTimer(sllLegal);
+        for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
+            this.fixSLLblocksLiquidMD(blockType, this.SLLrows); 
+           }
+        this.stopandPrintSystemTimer(sllLegal);
+        while(!isLastIteration) {
+            double timerBegin = System.nanoTime();
+            StringBuilder output = new StringBuilder();
+            int dieCounter = this.TotalDies;
+            
+            
+            ExecutorService executor = Executors.newFixedThreadPool(this.TotalDies);
+            for (int i = 0; i < dieCounter; i++) { 
+                    Runnable worker = new ParallelOptiLeg(iteration,isLastIteration,timerBegin,i);  
+                    executor.execute(worker);//calling execute method of ExecutorService  
+
+              }  
+            executor.shutdown();  
+  	      try {
+	    	    executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+	    	} catch (InterruptedException e) {
+	    	    e.printStackTrace();
+	    	}
+
+            isLastIteration = this.stopCondition(iteration);
+            
+            iteration++;
+
+        }
     	
+    	//************************************************
        this.stopandPrintSystemTimer(placetimer);
        System.out.print(this.localOutput);
 
-       int dieCounter = 0;
-       String legaltimer = "Legalisation routine took";
-       this.startSystemTimer(legaltimer);
-       while(dieCounter < this.TotalDies) {
+        int dieCounter = 0;
+    	String legaltimer = "Legalisation routine took";
+    	this.startSystemTimer(legaltimer);
+        while(dieCounter < this.TotalDies) {
+        	//System.out.print("The die number is " + dieCounter + "\n");
+            //////////// Final legalization of the LABs ////////////
+            //Set up the temporary arrays.
             double [] linearXtemp = this.linearX.get(dieCounter);
             double [] linearYtemp = this.linearY.get(dieCounter);
             double [] legalXtemp = this.legalX.get(dieCounter);
@@ -606,6 +672,8 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
     		for(int i = 0; i < linearXtemp.length; i++){
     			linearXtemp[i] = bestLinearXtemp[i];
     			linearYtemp[i] = bestLinearYtemp[i];
+    		}
+    		for(int i = 0; i < legalXtemp.length; i++){
     			legalXtemp[i] = bestLegalXtemp[i];
     			legalYtemp[i] = bestLegalYtemp[i];
     		}
@@ -620,20 +688,26 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
             }
         	dieCounter++;
         }
-        
-        this.synchroniseSLLblocks(this.localOutput);
 
         this.logger.println();
 
         
-        try {
-        	String circuitUpdate = "Circuit update routine took";
-        	this.startSystemTimer(circuitUpdate);
-        	this.updateCircuit();
-        	this.stopandPrintSystemTimer(circuitUpdate);
-        } catch(PlacementException error) {
-        	this.logger.raise(error);
-        }
+        String circuitUpdate = "Circuit update routine took";
+		this.startSystemTimer(circuitUpdate);
+//		ExecutorService executor = Executors.newFixedThreadPool(this.TotalDies);
+//		for (int i = 0; i < dieCounter; i++) {  
+//		    Runnable worker = new parallelCircuitUpdate(i);  
+//		    executor.execute(worker);//calling execute method of ExecutorService  
+//		  }  
+//		executor.shutdown();  
+//	      try {
+//		    executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+//		} catch (InterruptedException e) {
+//		    e.printStackTrace();
+//		}
+	      
+        this.updateCircuit();
+		this.stopandPrintSystemTimer(circuitUpdate);
        
     }
     
@@ -652,13 +726,13 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
             	this.solveLegal(blockType, isLastIteration, dieCounter);
 //
             }
-            if(!this.Seperate_fix) {
-
-    		    for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
-    		        this.solveLinear(blockType, iteration, dieCounter); 
-    		        this.solveLegal(blockType, isLastIteration, dieCounter);
-    		    }
-            }
+//            if(!this.Seperate_fix) {
+//            	//this.localOutput.append("\n SLL is optimised\n");
+//    		    for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.SLLDUMMY)){
+//    		        this.solveLinear(blockType, iteration, dieCounter); 
+//    		        this.solveLegal(blockType, isLastIteration, dieCounter);
+//    		    }
+//            }
 
             for(BlockType blockType : BlockType.getBlockTypes(BlockCategory.IO)){
                 this.solveLinear(blockType, iteration, dieCounter); 
@@ -676,9 +750,11 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
         
         double timerEnd = System.nanoTime();
         double time = (timerEnd - timerBegin) * 1e-9;
-        
-        return this.printStatistics(iteration, time, dieCounter);
+        this.printStatistics(iteration, time, dieCounter);
 
+        return this.printStatistics(iteration, time, dieCounter);
+        
+        //this.localOutput.append();
     }
     private void addLinearPlacement(int iteration, int dieNumber){
         this.visualizer[dieNumber].addPlacement(
@@ -693,8 +769,63 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
                 this.legalCost[dieNumber]);
     }
 
+    
+    private void updateCircuitPerDie(int dieCounter) throws PlacementException {
+    	this.startTimer(T_UPDATE_CIRCUIT, dieCounter);
+		double [] legalXtemp = this.legalX.get(dieCounter);
+		double [] legalYtemp = this.legalY.get(dieCounter);
+		
+//        for(int i=0; i<legalYtemp.length; i++) {
+//        	System.out.print("\nThe index is " + i + " legalX is " + legalXtemp[i] + " legalY is " + legalYtemp[i]);
+//        }
+        
+		// Clear all previous locations
+        for(GlobalBlock block : this.netBlocks.get(dieCounter).keySet()) {
+            block.removeSite();
+        }
+        
+        //System.out.print("\nThe size of the legalXtemp is " + legalXtemp.length + "\n");
+
+        // Update locations
+        for(Map.Entry<GlobalBlock, NetBlock> blockEntry : this.netBlocks.get(dieCounter).entrySet()) {
+        	
+            GlobalBlock block = blockEntry.getKey();
+            //System.out.print("\nThe die number is " + dieCounter );
+//            System.out.print("\nThe block is " + block.getName());
+            NetBlock netBlock = blockEntry.getValue();
+           // System.out.print("\nThe netblock is " + netBlock.blockIndex);
+            int index = netBlock.blockIndex;
+            int offset = (int) Math.ceil(netBlock.offset);
+
+            int column = (int)Math.round(legalXtemp[index]);
+            int row = (int)Math.round(legalYtemp[index] + offset);
+
+            if(block.getCategory() != BlockCategory.IO) {
+            	if(block.getCategory() == BlockCategory.SLLDUMMY) {
+//            	   this.logger.print("\n the block is " + block.getName() + "  " + column + " " +row + " " + dieCounter );
+            		AbstractSite virtualSite = this.circuitDie[dieCounter].getVirtualSite(dieCounter, column, row, true);	
+//            		System.out.print("\n The site is marked" + virtualSite);
+                    block.setSite(virtualSite);
+                   // }
+                   // 
+                    
+            	}else {
+//                	this.logger.print("\n the block is " + block.getName() + " and type " + block.getType() + column + " " +row + " " + dieCounter );
+                    Site site = (Site) this.circuitDie[dieCounter].getSite(dieCounter, column, row, true);
+//                   System.out.print("\nThe site is " + site);
+                    block.setSite(site);    
+            	}
+            }else{
+//            	this.logger.print("\n or else the block is " + block.getName() + "  " + column + " " +row + " for die " + dieCounter + "\n");
+                IOSite site = (IOSite) this.circuitDie[dieCounter].getSite(dieCounter, column, row, true);
+                block.setSite(site);
+            }
+        }
+        this.circuitDie[dieCounter].getTimingGraph().calculateCriticalities(true);
+        this.stopTimer(T_UPDATE_CIRCUIT, dieCounter);
+    }
     protected void updateCircuit() throws PlacementException {
-    	
+       	
     	int dieCounter = 0; 
     	
     	while(dieCounter < this.TotalDies) {
@@ -724,7 +855,8 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
                 if(block.getCategory() != BlockCategory.IO) {
                 	if(block.getCategory() == BlockCategory.SLLDUMMY) {
                 		AbstractSite virtualSite = this.circuitDie[dieCounter].getVirtualSite(dieCounter, column, row, true);	
-                        block.setSite(virtualSite);     
+                        block.setSite(virtualSite);
+
                 	}else {
 	                    Site site = (Site) this.circuitDie[dieCounter].getSite(dieCounter, column, row, true);
 
@@ -948,33 +1080,65 @@ public abstract class AnalyticalAndGradientPlacer extends Placer{
     	
     }
     
-    class nestedThreading implements Runnable{
-    	int startIteration;
-    	boolean isLastIteration;
-    	double timerBegin;
+ 
+    
+    
+    class parallelCircuitUpdate implements Runnable{
     	int dieCounter;
-    	int nSync;
-
-    	public nestedThreading(int iteration, boolean isLastIteration, double timerBegin, int dieCounter, int nSync){// int syncStep) {
-    		this.startIteration = iteration;
-    		this.isLastIteration = isLastIteration;
-    		this.timerBegin = timerBegin;
+    	StringBuilder output = new StringBuilder();
+    	public parallelCircuitUpdate(int dieCounter) {
     		this.dieCounter = dieCounter;
-    		this.nSync = nSync;
-
     	}
     	@Override
     	public void run() {
-    		int currentIteration = this.startIteration;
-    		
-    		for(int i = 1; i <= this.nSync; i++) {
-    			currentIteration =  this.startIteration + i;
-
-        		System.out.print("\nThe iteration counter is " + currentIteration + " for die " + this.dieCounter +"\n");
-
-    		}
+    		//System.out.print("\nThe die running is " + this.dieCounter)
+    		//System.out.println(Thread.currentThread().getName() + " Start");  
+    		try {
+				updateCircuitPerDie(this.dieCounter);
+			} catch (PlacementException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+    		//System.out.println(Thread.currentThread().getName()+" (End)");
+//    		System.out.println(this.output);
     	}
     	
     	
     }
+    
+
+    
+    class BlockInfo {
+        private int dieIndex;
+        private int blockCounter;
+        private boolean isSource;
+        private int x, y;
+
+        BlockInfo(int dieIndex, int blockCounter, boolean isSource) {
+            this.dieIndex = dieIndex;
+            this.blockCounter = blockCounter;
+            this.isSource = isSource;
+        }
+        
+        public int getDieID() {
+        	return this.dieIndex;
+        }
+        public void setXY(int x, int y) {
+        	this.x = x;
+        	this.y = y;
+        }
+        public int getX() {
+        	return this.x;
+
+        }
+        
+        public int getY() {
+        	return this.y;
+        }
+        
+        public int getBlockCounter() {
+        	return this.blockCounter;
+        }
+    }
+
 }

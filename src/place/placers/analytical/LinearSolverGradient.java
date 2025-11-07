@@ -43,6 +43,7 @@ class LinearSolverGradient {
     void processNet(int netStart, int netEnd) {
         int numNetBlocks = netEnd - netStart;
         double weight = AnalyticalAndGradientPlacer.getWeight(numNetBlocks);
+       // System.out.print("\nThe netstart is " +netStart + " netend is " +netEnd + " and the weight is " + weight+ "\n");
 
         // Nets with 2 blocks are common and can be processed very quick
         if(numNetBlocks == 2) {

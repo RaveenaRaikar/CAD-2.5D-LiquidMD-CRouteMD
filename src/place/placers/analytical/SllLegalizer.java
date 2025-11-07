@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 import place.circuit.block.GlobalBlock;
+import place.circuit.block.SLLNetBlocks;
+import place.placers.analytical.AnalyticalAndGradientPlacer.BlockInfo;
 
 
 
@@ -17,7 +19,8 @@ public class SllLegalizer {
     protected Map<String, Integer> sLLNodeList;
     protected List<List<List<SLLBlock>>> blockMatrix;
     private List<SLLBlock> allSLLBlocks;
-    protected Map<String,List<Integer>> SLLcounter;
+    private Map<String, SLLNetBlocks> netToBlockSLL = new HashMap<>();
+    protected Map<String, List<BlockInfo>> SLLcounter;
     protected Map<String,List<Integer>> sllYlocation;
     protected Boolean[] fullSitesTempX;
     protected Integer width;
@@ -30,11 +33,12 @@ public class SllLegalizer {
 			List<double[]> linearY,
 			List<double[]> legalX,
 			List<double[]> legalY,
-			Map<String,List<Integer>> SLLcounter,
+			Map<String, List<BlockInfo>> SLLcounter,
 			Map<String,Integer> sllNodelist,
 			Integer width,
 			Integer height,
-			Integer sllRows) {
+			Integer sllRows,
+			Map<String, SLLNetBlocks> netToBlockSLL) {
 		this.linearX = linearX;
 		this.linearY = linearY;
 		this.legalX = legalX;
@@ -44,31 +48,97 @@ public class SllLegalizer {
 		this.height = height;
 		this.SLLrows = sllRows;
 		this.sLLNodeList = sllNodelist;
+		this.netToBlockSLL = netToBlockSLL;
 		//This array contains the SLL blocks which act as the sink on the Die (Datain timing node)
 		
 		this.tempLegalX = new HashMap<String,Integer>();
 		this.tempLegalY = new HashMap<String,Integer>();
 		
         this.blockMatrix = new ArrayList<List<List<SLLBlock>>>(this.width+2);
-
+       // this.finalBlockMatrix = new ArrayList<List<List<SLLBlock>>>(this.width+2);
         for(int column = 0; column < this.width + 2; column++) {
             List<List<SLLBlock>> blockColumn = new ArrayList<>(this.SLLrows+2);
             for(int row = 0; row < this.SLLrows + 1; row++) {
                 blockColumn.add(new ArrayList<SLLBlock>());
             }
             this.blockMatrix.add(blockColumn);
-
+         //   this.finalBlockMatrix.add(blockColumn);
         }
     }
 	
 	protected StringBuilder legaliseSLLblock(StringBuilder localOutput) {
-
-		getBestPositions();
-
+//		localOutput.append("\nThe Synchronisation is ongoing");
+//		getBestPositions();
+		calculateBBoxofNet();
 		initializeSLLregion();
 		checkForCongestion();
 		updateLegalPosition();
 		return localOutput;
+	}
+	
+	protected void calculateBBoxofNet() {
+		//Get the SLLNetBlock;
+		//Get the sourceBlock, and sinkBlocks;
+		//Get the corresponding netBlocks, and the Legal positions
+		//Get minX,maxX and so on.
+
+		for(String netName : this.netToBlockSLL.keySet()) {
+			int dieCount = 0;
+			List<Integer> blockIndexList = new ArrayList<>();
+			double minX, maxX, minY, maxY = 0;
+			double die0_Y = 0, die1_Y = 0;
+			double currentX,currentY = 0;
+			int finalX,finalY = 0;
+			SLLNetBlocks sllBlock = this.netToBlockSLL.get(netName);
+			GlobalBlock sourceBlock = sllBlock.sourceBlock;
+			GlobalBlock dummyBlock = sllBlock.dummySource;
+			dieCount = sourceBlock.getDie();
+			minX = this.legalX.get(dieCount)[sllBlock.getNetBlockIndex(sourceBlock)];
+			maxX = this.legalX.get(dieCount)[sllBlock.getNetBlockIndex(sourceBlock)];
+			minY = this.legalY.get(dieCount)[sllBlock.getNetBlockIndex(sourceBlock)];
+			maxY = this.legalY.get(dieCount)[sllBlock.getNetBlockIndex(sourceBlock)];
+			
+			//if die0 then maxY ; if die 1 then minY
+			
+			if(dieCount == 0) {
+				dieCount = 1;
+				die0_Y= maxY;
+			}else {
+				dieCount = 0;
+				die1_Y = minY;
+			}
+			blockIndexList = sllBlock.getBlockIndexList();
+			for(int blockID: blockIndexList) {
+				currentX = this.legalX.get(dieCount)[blockID];
+				currentY = this.legalY.get(dieCount)[blockID];
+				if(currentX < minX) {
+					minX = currentX;
+				}
+				if(currentX >= maxX) {
+					maxX = currentX;
+				}
+				if(currentY < minY) {
+					minY = currentY;
+				}
+				if(currentY >= maxY) {
+					maxY = currentY;
+				}
+				if(dieCount == 1) {
+					die1_Y = minY;
+				}else {
+					die0_Y= maxY;
+				}
+			}
+			
+			//Ideal coordinates:
+			finalX = this.getBestXPosition(minX, maxX);
+			finalY = (int) this.getYCloseToSLLRows(die0_Y, die1_Y);
+//			System.out.print("\nThe block added is " + dummyBlock.getName());
+//			System.out.print("min Y : " + minY + " max Y:" + maxY);
+			this.tempLegalX.put(dummyBlock.getName(), finalX);
+			this.tempLegalY.put(dummyBlock.getName(), finalY);
+		}
+		
 		
 	}
 	protected void initializeSLLregion(){
@@ -84,7 +154,7 @@ public class SllLegalizer {
 		for(String block: this.SLLcounter.keySet())
     	{
 
-			List<Integer> blockcounter = this.SLLcounter.get(block);
+			Map<Integer, Integer> blockcounter = new HashMap<>(); 
 
 			int column = this.tempLegalX.get(block);
 			int row = this.tempLegalY.get(block);
@@ -106,7 +176,7 @@ public class SllLegalizer {
 			int die0_X, die1_X = 0;
 			int die0_Y, die1_Y = 0;
 			int avgX, avgY = 0;
-			List<Integer> blockcounter = this.SLLcounter.get(block);
+			Map<Integer, Integer> blockcounter = new HashMap<>();
 			
 			die0_X = (int) this.linearX.get(0)[blockcounter.get(0)];
 			die0_Y = (int) this.linearY.get(0)[blockcounter.get(0)];
@@ -166,6 +236,14 @@ public class SllLegalizer {
 		
 	}
 	
+	
+	protected int getBestYPositionNew(double minY) {
+		if(minY < this.SLLrows) {
+			return (int) minY;
+		}else {
+			return this.SLLrows - 2;
+		}
+	}
 	protected int getBestX(double die0X, double die1X) {
 		int bestX = 0;
 		
@@ -189,6 +267,30 @@ public class SllLegalizer {
 		return bestY;
 	}
 	
+	protected int getYCloseToSLLRows(double die0Y, double die1Y) {
+        // Define the ranges
+        int y1LowerBound = this.height - this.SLLrows;
+        int y1UpperBound = this.height;
+        int y2LowerBound = 0;
+        int y2UpperBound = this.SLLrows;
+
+        // Check if Y1 is within its range
+        if (die0Y > y1LowerBound && die0Y <= y1UpperBound) {
+            return (int) die0Y - y1LowerBound;
+        }
+
+        // Check if Y2 is within its range
+        if (die1Y >= y2LowerBound && die1Y < y2UpperBound) {
+            return (int) die1Y;
+        }
+
+        // Neither Y1 nor Y2 is in the range, determine which is closer
+        int distanceToY1Range = (int) Math.min(Math.abs(die0Y - y1LowerBound), Math.abs(die0Y - y1UpperBound));
+        int distanceToY2Range = (int) Math.min(Math.abs(die1Y - y2LowerBound), Math.abs(die1Y - y2UpperBound));
+
+        // Return 0 if Y1 is closer to its range, or sllrows if Y2 is closer
+        return (distanceToY1Range <= distanceToY2Range) ? 0 : this.SLLrows - 1;
+	}
 	protected double getBestYPositionNew(boolean die1ID, double die0Y, double die1Y) {
 		int height = this.height;
 		double bestY = 0;
@@ -207,7 +309,7 @@ public class SllLegalizer {
         for(int column = 1; column < this.width - 1; column++) {
             for(int row = 0; row < this.SLLrows ; row++) { //Change to accept SLL variable
             	this.allSLLBlocks = this.blockMatrix.get(column).get(row);
-
+            	//numSLLblocks = this.blockMatrix.get(column).get(row);
             	int initialBlocks = this.blockMatrix.get(column).get(row).size();
             	
             	if(initialBlocks>1) {

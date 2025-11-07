@@ -61,7 +61,7 @@ class Placement {
     }
 
     private void initializeData(String name, Circuit circuit) {
-        this.name = circuit.getName() + " | " + name;
+        this.name = circuit.getName() + " | " + name + " | die " + circuit.getCurrentDie() ;
         this.circuit = circuit;
         this.numBlocks = circuit.getGlobalBlocks().size();
 

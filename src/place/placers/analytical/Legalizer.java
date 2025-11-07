@@ -179,7 +179,7 @@ abstract class Legalizer {
 
     
     
-    protected abstract void legalizeBlockType(int blocksStart, int blocksEnd);
+    protected abstract void legalizeBlockType(int blocksStart, int blocksEnd, int dieCounter);
 
     void updateCriticalConnections(List<CritConn> criticalConnections){
     	this.hardblockLegalizer.updateCriticalConnections(criticalConnections);
@@ -228,11 +228,17 @@ abstract class Legalizer {
 
             if(this.blockType.getCategory().equals(BlockCategory.CLB)){
 
-            	this.legalizeBlockType(blocksStart, blocksEnd);
+            	this.legalizeBlockType(blocksStart, blocksEnd, this.circuit.getCurrentDie() );
         	}else if(this.blockType.getCategory().equals(BlockCategory.HARDBLOCK)){
         		this.hardblockLegalizer.legalizeHardblock(this.blockType, this.legalizerSettings.get("anneal_quality").getValue());
-        	}else if(this.blockType.getCategory().equals(BlockCategory.SLLDUMMY)){
-        		this.fixSLLPositions(blocksStart, blocksEnd);
+//        	}else if(this.blockType.getCategory().equals(BlockCategory.SLLDUMMY)){
+//        		this.fixSLLPositions(blocksStart, blocksEnd);
+//        		this.hardblockLegalizer.legalizeSLL(this.blockType, this.legalizerSettings.get("anneal_quality").getValue());
+//        		for(int b = blocksStart; b < blocksEnd; b++){
+//        			this.linearX[b] = this.legalX[b];
+//        			this.linearY[b] = this.legalY[b];
+//        			//System.out.print("\nThe value of legalX in legalise is " + this.legalX[b] +"\n" );
+//        		}
         	}else if(this.blockType.getCategory().equals(BlockCategory.IO)){
         		this.hardblockLegalizer.legalizeIO(this.blockType, this.legalizerSettings.get("anneal_quality").getValue());
         		for(int b = blocksStart; b < blocksEnd; b++){

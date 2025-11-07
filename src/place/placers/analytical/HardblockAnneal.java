@@ -239,9 +239,15 @@ public class HardblockAnneal {
 		Site site1 = block1.getSite();
 		
 		Site site2 = this.sites[this.random.nextInt(this.numSites)];
+//		System.out.print("\n The num sites is " + this.numSites + " " + this.sites.length + " " + site2);
+//		System.out.print("\n Site 2 is " + site2.column  + " " + site2.row);
+//		if(site2 == null) {
+//			site2 = this.sites[this.random.nextInt(this.numSites)];
+//		}
 		while(site1.equals(site2) && (site2 != null) ){
 			site2 = this.sites[this.random.nextInt(this.numSites)];
 		}
+//		System.out.print("\n Site 1 is " + site1.column  + " " + site1.row);
 		
 		Block block2 = site2.getBlock();
 		

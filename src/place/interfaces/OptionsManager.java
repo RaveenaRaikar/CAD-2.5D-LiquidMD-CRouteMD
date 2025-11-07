@@ -2,10 +2,12 @@ package place.interfaces;
 
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 
 import place.circuit.Circuit;
+import place.circuit.block.SLLNetBlocks;
 import place.circuit.timing.TimingGraphSLL;
 import place.main.Main;
 import place.placers.Placer;
@@ -51,11 +53,11 @@ public abstract class OptionsManager {
 
         return this.placerFactory.newPlacer(placerName, circuit, options, random, visualizer, Totaldies, SLLrows);
     }
-    public Placer getPlacer(int placerIndex, Circuit[] circuit, Random random, PlacementVisualizer[] visualizer, int Totaldies, int SLLrows, TimingGraphSLL timingGraphSLL) {
+    public Placer getPlacer(int placerIndex, Circuit[] circuit, Random random, PlacementVisualizer[] visualizer, int Totaldies, int SLLrows, TimingGraphSLL timingGraphSLL, HashMap<String, SLLNetBlocks>  netToBlockSLL) {
         String placerName = this.placerNames.get(placerIndex);
         Options options = this.placerOptions.get(placerIndex);
 
-        return this.placerFactory.newPlacer(placerName, circuit, options, random, visualizer, Totaldies, SLLrows, timingGraphSLL);
+        return this.placerFactory.newPlacer(placerName, circuit, options, random, visualizer, Totaldies, SLLrows, timingGraphSLL, netToBlockSLL);
     }
     protected Options getDefaultOptions(String placerName) {
         return this.placerFactory.initOptions(placerName);

@@ -53,7 +53,7 @@ public class TimingGraph {
     private double maxDelay;
 
     private double[] criticalityLookupTable = new double[21];
-    
+    private double sllDelay;
     //Tarjan's strongly connected components algorithm
     private int index;
     private Stack<TimingNode> stack;
@@ -62,7 +62,7 @@ public class TimingGraph {
     public TimingGraph(Circuit circuit) {
         this.circuit = circuit;
         this.delayTables = this.circuit.getArchitecture().getDelayTables();
-
+        this.sllDelay = this.circuit.getArchitecture().sllDelay;
         // Create the virtual io clock domain
         this.virtualIoClockDomain = 0;
         this.clockNamesToDomains.put(VIRTUAL_IO_CLOCK, this.virtualIoClockDomain);
@@ -124,7 +124,7 @@ public class TimingGraph {
                         if(abstractPin.getSource() != null) {
 
                             LeafPin inputPin = (LeafPin) abstractPin;
-                            TimingNode node = new TimingNode(block, inputPin, Position.LEAF, clockDomain, clockDelay);
+                            TimingNode node = new TimingNode(block, inputPin, Position.LEAF, clockDomain, clockDelay, this.circuit.getCurrentDie());
                             inputPin.setTimingNode(node);
 
                             clockDelays.add(0.0);
@@ -141,7 +141,7 @@ public class TimingGraph {
                     LeafPin outputPin = (LeafPin) abstractPin;
                     
                     if(outputPin.getNumSinks() > 0){
-                        TimingNode node = new TimingNode(block, outputPin, position, clockDomain, clockDelay);
+                        TimingNode node = new TimingNode(block, outputPin, position, clockDomain, clockDelay, this.circuit.getCurrentDie());
                         outputPin.setTimingNode(node);
 
                         this.timingNodes.add(node);
@@ -176,7 +176,7 @@ public class TimingGraph {
 
         					GlobalPin inputPin = (GlobalPin) abstractPin ;
 
-        					TimingNode node = new TimingNode(block, inputPin, Position.SLLNODE, clockDomain, clockDelay);
+        					TimingNode node = new TimingNode(block, inputPin, Position.SLLNODE, clockDomain, clockDelay, this.circuit.getCurrentDie());
         					inputPin.setTimingNode(node);
         					clockDelays.add(0.0);
         					node.setSLLNodeasSink();
@@ -189,7 +189,7 @@ public class TimingGraph {
                     	GlobalPin outputPin = (GlobalPin) abstractPin;
                     	
                         if(outputPin.getNumSinks() > 0){
-                            TimingNode node = new TimingNode(block, outputPin, Position.SLLNODE, clockDomain, clockDelay);
+                            TimingNode node = new TimingNode(block, outputPin, Position.SLLNODE, clockDomain, clockDelay, this.circuit.getCurrentDie());
                             abstractPin.setTimingNode(node);
                             node.setSLLNodeasSource();
                             this.timingNodes.add(node);
@@ -692,20 +692,13 @@ public class TimingGraph {
         return this.maxDelay;
     }
     public void calculateCriticalities(boolean calculateWireDelays) {
-    	
         if(calculateWireDelays) {
             this.calculateWireDelays();
         }
 
         this.calculateArrivalTimesAndCriticalities(true);
     }
-    public void calculateCriticalities(boolean calculateWireDelays, double sysMaxDelay) {
-        if(calculateWireDelays) {
-            this.calculateWireDelays();
-        }
 
-        this.calculateArrivalTimesAndCriticalities(true, sysMaxDelay);
-    }
  
     //private void calculateArrivalTimesAndCriticalities(boolean calculateCriticalities, boolean firstUpdate) {
     private void calculateArrivalTimesAndCriticalities(boolean calculateCriticalities) {
@@ -717,7 +710,10 @@ public class TimingGraph {
         }
 
         for(TimingNode node : this.arrivalTraversal) {
-        	if(!node.isSLLsource()) {
+        	if(node.isSLLsource()) {
+        		node.setArrivalTime(0);
+        	}else 
+        	{
         		node.updateArrivalTime();
         	}
         }
@@ -733,14 +729,17 @@ public class TimingGraph {
         		leafNode.setRequiredTime(this.maxDelay + leafNode.getClockDelay());
         	}
             for(TimingNode node: this.requiredTraversal) {
-            	if(!node.isSLLsink()) {
-            		node.updateRequiredTime();
+            	if(node.isSLLsink()) {
+            		node.setRequiredTime(this.maxDelay);
+            	}else 
+            	{
+	            	node.updateRequiredTime();
             	}
             }
             for(TimingEdge edge:this.globalTimingEdges){
             	double slack = 0;
             	if(edge.getSource().getSLLnodestatus()) {
-            		slack = edge.getSink().getRequiredTime() - edge.getSource().getArrivalTime() - edge.getTotalDelay() - (this.circuit.getArchitecture().sllDelay);
+            		slack = edge.getSink().getRequiredTime() - edge.getSource().getArrivalTime() - edge.getTotalDelay() - (this.sllDelay);
             	}else {
             		slack = edge.getSink().getRequiredTime() - edge.getSource().getArrivalTime() - edge.getTotalDelay();
             	}
@@ -754,59 +753,15 @@ public class TimingGraph {
                 edge.setCriticality(
                         (1 - linearInterpolation) * this.criticalityLookupTable[i]
                         + linearInterpolation * this.criticalityLookupTable[i+1]);
+                if(edge.getSink().getSLLnodestatus()) {
+                	//System.out.print("\nThe source edge criticality is " + edge.getCriticality());
+                	//if(edge.getCriticality() >0.8) {
+                		edge.setCriticality(1);
+                		//System.out.print("\nThe edge source is " + edge.getSource() + " and the sink is " + edge.getSink() +" and the criticality is " + edge.getCriticality());
+                	//}
+                	
+                }
             }
-        }
-    }
-    private void calculateArrivalTimesAndCriticalities(boolean calculateCriticalities, double maxSysDelay) {
-        //GLOBAL MAX DELAY
-    	this.maxDelay = 0;
-    	//ARRIVAL TIME
-        for(TimingNode rootNode: this.rootNodes){
-        	rootNode.setArrivalTime(0);
-        }
-
-        for(TimingNode node : this.arrivalTraversal) {
-
-        	if(!node.isSLLsource()) {
-        		node.updateArrivalTime();        		
-        	}
-        }
-        
-        
-        for(TimingNode leafNode: this.leafNodes){        	
-        	this.maxDelay = Math.max(this.maxDelay, (leafNode.getArrivalTime() - leafNode.getClockDelay()));
-//        	this.maxDelay = Math.max(this.maxDelay, maxSysDelay);
-        }
-        if(calculateCriticalities) {
-        	//REQUIRED TIME
-        	for(TimingNode leafNode: this.leafNodes) {
-        		leafNode.setRequiredTime(this.maxDelay + leafNode.getClockDelay());
-        		
-        		
-        	}
-            for(TimingNode node: this.requiredTraversal) {
-            	if(!node.isSLLsink()) {
-            		node.updateRequiredTime();
-            	}
-            }
-            for(TimingEdge edge:this.globalTimingEdges){
-            	double slack = 0;
-            	slack = edge.getSink().getRequiredTime() - edge.getSource().getArrivalTime() - edge.getTotalDelay();
-
-
-        		slack = Math.min(slack,	this.maxDelay);
-        		slack = Math.max(slack,	0);
-
-                double val = (1 - slack/this.maxDelay) * 20;
-                int i = Math.min(19, (int) val);
-                double linearInterpolation = val - i;
-
-                edge.setCriticality(
-                        (1 - linearInterpolation) * this.criticalityLookupTable[i]
-                        + linearInterpolation * this.criticalityLookupTable[i+1]);
-                
-            }
-
         }
     }
 
